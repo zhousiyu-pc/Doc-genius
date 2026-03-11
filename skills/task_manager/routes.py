@@ -1,5 +1,7 @@
 """
-任务管理 Skill — REST API 路由
+任务管理 Skill — REST API 路由（优化版）
+======================================
+新增智能分析接口，支持自然语言需求输入。
 """
 
 import logging
@@ -10,23 +12,100 @@ from starlette.routing import Route
 
 from ...core.config import LLM_API_KEY
 from ...core.db import get_db
-from .service import submit_task, retry_failed_task, resume_task, sync_task_counts
+from ...core.analyzer import analyze_requirement
+from .service import (
+    submit_task,
+    submit_task_with_analysis,
+    retry_failed_task,
+    resume_task,
+    sync_task_counts,
+)
 
 logger = logging.getLogger("agent_skills.task_manager")
 
 
-async def api_submit_task(request: Request) -> JSONResponse:
+async def api_analyze_requirement(request: Request) -> JSONResponse:
     """
-    POST /api/tasks — 提交新任务
-
+    POST /api/tasks/analyze — 智能分析需求并创建任务（推荐接口）
+    
+    用户只需输入自然语言需求，系统自动分析并生成详细功能点列表。
+    
     请求体 JSON：
     {
-        "feature_list": ["模块A-功能1", "模块A-功能2", ...],
+        "requirement": "我想做一个跨境电商 ERP，主要卖亚马逊和 TikTok...",
+        "save_directory": "~/Documents/ERP 需求文档",  // 可选
+        "detail_level": "详细"  // 可选，默认"详细"
+    }
+    
+    响应示例：
+    {
+        "success": true,
+        "task_id": "a1b2c3d4e5f6",
+        "feature_count": 18,
+        "complexity": "中等",
+        "core_modules": ["商品", "订单", "物流", "采购"],
+        "platforms": ["Amazon", "TikTok Shop"],
+        "questions": [
+            {
+                "field": "warehouse_locations",
+                "question": "您的仓库分布在哪些地区？",
+                "options": ["仅国内仓", "国内 + 海外仓", "纯海外仓"]
+            }
+        ],
+        "message": "已创建任务，将生成 18 个功能点的详细需求文档"
+    }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"success": False, "message": "请求体必须为有效的 JSON"},
+            status_code=400,
+        )
+
+    requirement = body.get("requirement", "")
+    if not requirement:
+        return JSONResponse(
+            {"success": False, "message": "requirement 不能为空"},
+            status_code=400,
+        )
+    if not LLM_API_KEY:
+        return JSONResponse(
+            {"success": False, "message": "LLM_API_KEY 未配置，请设置环境变量"},
+            status_code=500,
+        )
+
+    try:
+        # 调用智能分析接口
+        result = submit_task_with_analysis(
+            raw_requirement=requirement,
+            save_directory=body.get("save_directory", ""),
+            detail_level=body.get("detail_level", "详细"),
+        )
+        
+        return JSONResponse(result)
+    
+    except Exception as e:
+        logger.exception("需求分析失败")
+        return JSONResponse(
+            {"success": False, "message": f"分析失败：{str(e)}"},
+            status_code=500,
+        )
+
+
+async def api_submit_task(request: Request) -> JSONResponse:
+    """
+    POST /api/tasks — 提交新任务（传统接口，兼容旧代码）
+    
+    请求体 JSON：
+    {
+        "feature_list": ["模块 A-功能 1", "模块 A-功能 2", ...],
         "context": "项目整体背景描述",
-        "business_model": "B2C零售",
+        "business_model": "B2C 零售",
         "target_market": "北美",
         "platforms": "Amazon, Shopify",
-        "detail_level": "详细"
+        "detail_level": "详细",
+        "doc_context": {}  // 可选，文档汇总上下文
     }
     """
     try:
@@ -115,11 +194,7 @@ async def api_task_status(request: Request) -> JSONResponse:
 
 
 def _build_results_response(task_id: str) -> dict | None:
-    """
-    构建任务结果响应。
-    如果任务不存在返回 None，否则返回结果字典。
-    包含 result_file（如已自动保存）和进度信息。
-    """
+    """构建任务结果响应"""
     with get_db() as conn:
         task = conn.execute(
             "SELECT status, total_count, completed_count, failed_count, result_file FROM tasks WHERE id = ?",
@@ -159,13 +234,7 @@ def _build_results_response(task_id: str) -> dict | None:
 
 
 async def api_task_results(request: Request) -> JSONResponse:
-    """
-    GET /api/tasks/{task_id}/results — 获取任务结果
-
-    默认非阻塞：立即返回当前状态、进度和已保存的文件路径。
-    Dify 代码节点可在自身内部做短间隔轮询，每次 HTTP 请求瞬间返回，
-    不会触发沙箱/连接层的超时限制。
-    """
+    """GET /api/tasks/{task_id}/results — 获取任务结果"""
     task_id = request.path_params["task_id"]
 
     data = _build_results_response(task_id)
@@ -176,9 +245,7 @@ async def api_task_results(request: Request) -> JSONResponse:
 
 
 async def api_retry_failed(request: Request) -> JSONResponse:
-    """
-    POST /api/tasks/{task_id}/retry — 重试任务中所有失败的子任务
-    """
+    """POST /api/tasks/{task_id}/retry — 重试失败的子任务"""
     task_id = request.path_params["task_id"]
     result = retry_failed_task(task_id)
     status_code = 200 if result["success"] else 404
@@ -186,9 +253,7 @@ async def api_retry_failed(request: Request) -> JSONResponse:
 
 
 async def api_sync_task(request: Request) -> JSONResponse:
-    """
-    POST /api/tasks/{task_id}/sync — 根据子任务实际状态重新同步任务计数
-    """
+    """POST /api/tasks/{task_id}/sync — 同步任务计数"""
     task_id = request.path_params["task_id"]
     result = sync_task_counts(task_id)
     status_code = 200 if result["success"] else 404
@@ -196,9 +261,7 @@ async def api_sync_task(request: Request) -> JSONResponse:
 
 
 async def api_resume_task(request: Request) -> JSONResponse:
-    """
-    POST /api/tasks/{task_id}/resume — 恢复执行任务中所有未完成的子任务（pending/running）
-    """
+    """POST /api/tasks/{task_id}/resume — 恢复执行未完成的任务"""
     task_id = request.path_params["task_id"]
     result = resume_task(task_id)
     status_code = 200 if result["success"] else 404
@@ -206,9 +269,17 @@ async def api_resume_task(request: Request) -> JSONResponse:
 
 
 routes = [
+    # 🆕 智能分析接口（推荐）
+    Route("/api/tasks/analyze", api_analyze_requirement, methods=["POST"]),
+    
+    # 传统接口（兼容）
     Route("/api/tasks", api_submit_task, methods=["POST"]),
+    
+    # 任务查询
     Route("/api/tasks/{task_id}", api_task_status, methods=["GET"]),
     Route("/api/tasks/{task_id}/results", api_task_results, methods=["GET"]),
+    
+    # 任务控制
     Route("/api/tasks/{task_id}/retry", api_retry_failed, methods=["POST"]),
     Route("/api/tasks/{task_id}/resume", api_resume_task, methods=["POST"]),
     Route("/api/tasks/{task_id}/sync", api_sync_task, methods=["POST"]),

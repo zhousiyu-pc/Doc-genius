@@ -1,21 +1,80 @@
-# Byte-compiled / optimized / DLL files
+# Agent Skills Server - .gitignore
+# ==================================
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
 # Virtual environments
-.venv/
 venv/
 env/
+ENV/
+.venv
+
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-# Local data / DB
-*.db
-*.sqlite3
+*~
+.project
+.pydevproject
+.settings/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
 # Logs
+logs/
 *.log
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# Output
+output/
+*.md
+
+# Environment
+.env
+.env.local
+.env.*.local
+
 # OS
 .DS_Store
 Thumbs.db
+
+# Temporary
+tmp/
+temp/
+*.tmp
+
+# Secrets
+*.pem
+*.key
+secrets/
