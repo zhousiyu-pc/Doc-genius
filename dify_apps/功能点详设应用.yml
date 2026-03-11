@@ -1,0 +1,112 @@
+app:
+  description: '接收单个功能点名称和项目上下文，输出该功能点的完整详细设计文档（Markdown格式），包含输入输出和测试要点。供任务管理服务通过 API 调用。'
+  icon: "\U0001F4DD"
+  icon_background: '#D5F5F6'
+  mode: completion
+  name: "功能点详设生成器"
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/tongyi:0.1.31@638e473191f93192f670875b06edf0bcb89a3433aa736be89ed1749073b8a168
+    version: null
+kind: app
+version: 0.3.0
+model_config:
+  agent_mode:
+    enabled: false
+    max_iteration: 5
+    strategy: function_call
+    tools: []
+  annotation_reply:
+    enabled: false
+  chat_prompt_config: {}
+  completion_prompt_config:
+    conversation_histories_role:
+      assistant_prefix: ''
+      user_prefix: ''
+    prompt:
+      text: "你是资深的跨境电商ERP产品经理，擅长撰写精确的功能需求文档。\n\n针对给定的功能点，输出完整的功能详细设计，包含输入输出和测试要点。\n\n输出格式（严格遵守 Markdown）：\n\n### [功能点名称]\n\n**功能描述**\n简要描述功能的业务目标和用户价值。\n\n**输入参数**\n| 参数名 | 类型 | 必填 | 说明 |\n|--------|------|------|------|\n| xxx    | xxx  | 是/否 | xxx  |\n\n**输出结果**\n| 输出项 | 类型 | 说明 |\n|--------|------|------|\n| xxx    | xxx  | xxx  |\n\n**业务规则**\n1. 规则一\n2. 规则二\n\n**测试要点**\n| 编号 | 测试场景 | 预期结果 | 优先级 |\n|------|----------|----------|--------|\n| TC01 | xxx      | xxx      | P0/P1/P2 |\n\n**异常场景**\n- 异常场景1：处理方式\n- 异常场景2：处理方式\n\n---\n\n请严格按以上格式输出，不要添加额外的解释性文字。"
+  dataset_configs:
+    datasets:
+      datasets: []
+    retrieval_model: single
+  dataset_query_variable: ''
+  external_data_tools: []
+  file_upload:
+    image:
+      detail: high
+      enabled: false
+      number_limits: 3
+      transfer_methods:
+      - remote_url
+      - local_file
+  model:
+    completion_params:
+      temperature: 0.3
+    mode: chat
+    name: qwen-plus
+    provider: langgenius/tongyi/tongyi
+  more_like_this:
+    enabled: false
+  opening_statement: ''
+  pre_prompt: "你是资深的跨境电商ERP产品经理，擅长撰写精确的功能需求文档。\n\n针对给定的功能点，输出完整的功能详细设计，包含输入输出和测试要点。\n\n背景信息：\n- 业务模式：{{business_model}}\n- 目标市场：{{target_market}}\n- 对接平台：{{platforms}}\n- 文档详细程度：{{detail_level}}\n\n输出格式（严格遵守 Markdown）：\n\n### [功能点名称]\n\n**功能描述**\n简要描述功能的业务目标和用户价值。\n\n**输入参数**\n| 参数名 | 类型 | 必填 | 说明 |\n|--------|------|------|------|\n| xxx    | xxx  | 是/否 | xxx  |\n\n**输出结果**\n| 输出项 | 类型 | 说明 |\n|--------|------|------|\n| xxx    | xxx  | xxx  |\n\n**业务规则**\n1. 规则一\n2. 规则二\n\n**测试要点**\n| 编号 | 测试场景 | 预期结果 | 优先级 |\n|------|----------|----------|--------|\n| TC01 | xxx      | xxx      | P0/P1/P2 |\n\n**异常场景**\n- 异常场景1：处理方式\n- 异常场景2：处理方式\n\n---\n\n请严格按以上格式输出，不要添加额外的解释性文字。"
+  prompt_type: simple
+  retriever_resource:
+    enabled: false
+  sensitive_word_avoidance:
+    enabled: false
+  speech_to_text:
+    enabled: false
+  suggested_questions: []
+  suggested_questions_after_answer:
+    enabled: false
+  text_to_speech:
+    enabled: false
+    language: ''
+    voice: ''
+  user_input_form:
+  - text-input:
+      default: ''
+      label: 功能点名称
+      max_length: 256
+      required: true
+      variable: feature_name
+  - text-input:
+      default: ''
+      label: 项目背景
+      max_length: 8192
+      required: true
+      variable: project_context
+  - select:
+      default: "B2C零售"
+      label: 业务模式
+      options:
+      - "B2C零售"
+      - "B2B批发"
+      - "B2C+B2B混合"
+      - "DTC品牌出海"
+      required: true
+      variable: business_model
+  - text-input:
+      default: ''
+      label: 目标市场
+      max_length: 256
+      required: false
+      variable: target_market
+  - text-input:
+      default: ''
+      label: 对接平台
+      max_length: 512
+      required: false
+      variable: platforms
+  - select:
+      default: "详细"
+      label: 文档详细程度
+      options:
+      - "精简"
+      - "详细"
+      - "完整"
+      required: true
+      variable: detail_level
