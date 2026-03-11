@@ -1,7 +1,7 @@
 """
-任务管理 Skill — 核心业务逻辑（优化版）
+任务管理 Skill — 核心业务逻辑（通用版）
 ======================================
-集成需求分析引擎，支持智能文档生成。
+支持多领域文档生成，不依赖 Dify。
 任务完成后自动汇总文档并保存为 Markdown 文件。
 """
 
@@ -31,7 +31,7 @@ _executor: Optional[ThreadPoolExecutor] = None
 _shutdown_event = threading.Event()
 
 
-# ── 优化版文档模板（5W2H + 测试驱动）──────────────────────────
+# ── 通用版文档模板（5W2H + 测试驱动）──────────────────────────
 
 _FEATURE_TEMPLATE = """### {feature_name}
 
@@ -121,11 +121,12 @@ _FEATURE_TEMPLATE = """### {feature_name}
 ---
 """
 
-_DOC_TEMPLATE = """# {project_name} - 需求规格说明书
+_DOC_TEMPLATE = """# {project_name}
 
 > 文档版本：1.0  
 > 生成时间：{generated_time}  
-> 复杂度：{complexity} | 预估功能点：{feature_count}
+> 复杂度：{complexity} | 预估功能点：{feature_count}  
+> 领域：{domain_name}
 
 ---
 
@@ -136,14 +137,14 @@ _DOC_TEMPLATE = """# {project_name} - 需求规格说明书
 
 ### 1.2 产品定位
 - **业务模式**：{business_model}
-- **目标市场**：{target_market}
-- **对接平台**：{platforms}
+- **目标用户**：{target_users}
+- **核心模块**：{core_modules_text}
 
-### 1.3 跨境电商特有考虑
-{cross_border_notes}
+### 1.3 行业最佳实践
+{common_features}
 
-### 1.4 合规要求
-{compliance_notes}
+### 1.4 特殊考虑
+{special_considerations}
 
 ## 二、系统架构
 
@@ -155,11 +156,11 @@ _DOC_TEMPLATE = """# {project_name} - 需求规格说明书
 ### 2.2 技术选型建议
 | 层级 | 推荐技术 | 说明 |
 |------|----------|------|
-| 前端 | Vue3 / React | 响应式设计，支持多语言 |
+| 前端 | Vue3 / React | 响应式设计，支持多端 |
 | 后端 | Python FastAPI / Node.js | 高并发 API 服务 |
-| 数据库 | PostgreSQL / MySQL | 支持事务和多币种 |
+| 数据库 | PostgreSQL / MySQL | 支持事务和复杂查询 |
 | 缓存 | Redis | 会话和热点数据缓存 |
-| 消息队列 | RabbitMQ / Kafka | 异步任务处理 |
+| 部署 | Docker + K8s | 容器化编排 |
 
 ### 2.3 部署架构
 - **部署方式**：Docker 容器化部署
@@ -207,34 +208,31 @@ _DOC_TEMPLATE = """# {project_name} - 需求规格说明书
 ### 8.1 阶段划分
 | 阶段 | 周期 | 交付物 |
 |------|------|--------|
-| Phase 1 | 2-3 周 | 核心模块（商品 + 订单） |
-| Phase 2 | 2-3 周 | 物流 + 仓储模块 |
-| Phase 3 | 2 周 | 财务 + 报表模块 |
-| Phase 4 | 1-2 周 | 系统集成测试 |
+| Phase 1 | 2-3 周 | 核心模块 |
+| Phase 2 | 2-3 周 | 扩展模块 |
+| Phase 3 | 1-2 周 | 系统集成测试 |
 
 ### 8.2 风险评估
 | 风险 | 概率 | 影响 | 缓解措施 |
 |------|------|------|----------|
-| API 限流 | 中 | 高 | 实现请求队列和退避重试 |
-| 数据一致性 | 中 | 高 | 分布式事务和补偿机制 |
 | 需求变更 | 高 | 中 | 敏捷迭代，快速响应 |
+| 技术难点 | 中 | 高 | 提前技术预研 |
+| 人员风险 | 中 | 中 | 文档完善，知识共享 |
 
 ## 九、附录
 
 ### 9.1 术语表
 | 术语 | 说明 |
 |------|------|
-| SKU | 库存量单位 |
-| FBA | Fulfillment by Amazon |
-| VAT | 增值税 |
+| API | 应用程序接口 |
+| ER | 实体关系图 |
 
 ### 9.2 参考资料
-- [Amazon SP-API 文档](https://developer-docs.amazon.com/sp-api)
-- [TikTok Shop API 文档](https://partner.tiktokshop.com/docv2/page)
+- [相关技术文档](待补充)
 
 ---
 
-_本文档由 Agent Skills Server 智能生成_
+_本文档由智能文档生成器自动生成_
 """
 
 
@@ -264,7 +262,7 @@ def shutdown_executor():
 def _process_sub_task(task_id: str, sub_task_id: str):
     """
     处理单个子任务：调用 LLM API 生成功能点详设。
-    使用优化版 5W2H + 测试驱动模板。
+    使用通用版 5W2H + 测试驱动模板。
     """
     task_log = get_task_logger(task_id)
 
@@ -307,8 +305,8 @@ def _process_sub_task(task_id: str, sub_task_id: str):
     except (json.JSONDecodeError, TypeError):
         pass
 
-    # 构建 Prompt（使用优化版模板）
-    system_prompt = """你是资深的跨境电商 ERP 系统架构师兼产品经理。
+    # 构建 Prompt（通用版模板）
+    system_prompt = """你是资深的系统架构师兼产品经理。
 你需要针对给定的功能点，输出一份完整的功能详细设计文档。
 
 请严格按照以下 5W2H + 测试驱动的格式输出，每个章节都必须填写具体内容：
@@ -321,7 +319,7 @@ def _process_sub_task(task_id: str, sub_task_id: str):
 6. Interface - 接口设计（内部 API 表、外部 API、数据模型）
 7. Test - 测试覆盖（功能测试用例表、边界测试、异常场景表、性能要求）
 8. Security - 安全设计（权限、脱敏、审计）
-9. Notes - 特殊说明（跨境特性、技术难点）
+9. Notes - 特殊说明（行业特性、技术难点）
 
 要求：
 - 所有内容必须结合项目背景具体展开，不要写通用模板
@@ -336,9 +334,9 @@ def _process_sub_task(task_id: str, sub_task_id: str):
         f"## 功能点名称\n{feature_name}\n\n"
         f"## 项目背景\n{llm_context}\n\n"
         f"## 背景信息\n"
-        f"- 业务模式：{task_row['business_model'] or 'B2C 零售'}\n"
-        f"- 目标市场：{task_row['target_market'] or '全球'}\n"
-        f"- 对接平台：{task_row['platforms'] or '未指定'}\n"
+        f"- 业务模式：{task_row['business_model'] or '通用'}\n"
+        f"- 目标用户：{task_row.get('target_users', '通用')}\n"
+        f"- 核心模块：{task_row.get('core_modules', '未指定')}\n"
         f"- 文档详细程度：{task_row['detail_level'] or '详细'}\n\n"
         f"请严格按照系统提示词中的 5W2H + 测试驱动格式输出，"
         f"所有章节都必须结合以上项目背景具体展开。"
@@ -349,8 +347,8 @@ def _process_sub_task(task_id: str, sub_task_id: str):
             feature_name=feature_name,
             project_context=user_message,
             business_model=task_row["business_model"],
-            target_market=task_row["target_market"],
-            platforms=task_row["platforms"],
+            target_market=task_row.get("target_users", ""),
+            platforms=task_row.get("platforms", ""),
             detail_level=task_row["detail_level"],
         )
 
@@ -466,7 +464,7 @@ def _auto_assemble_and_save(task_id: str, task_log: logging.Logger):
         except (json.JSONDecodeError, AttributeError):
             pass
 
-        project_name = doc_context.get("project_name", "跨境电商 ERP 系统")
+        project_name = doc_context.get("project_name", "系统需求规格说明书")
         save_directory = doc_context.get("save_directory", "")
         
         # 生成模块总览表格
@@ -476,19 +474,24 @@ def _auto_assemble_and_save(task_id: str, task_log: logging.Logger):
         for module in core_modules:
             module_features = [f for f in feature_list if module in f]
             module_overview += f"| {module} | {len(module_features)} | {', '.join(module_features[:3])} |\n"
-
+        
+        # 生成通用特性列表
+        common_features = doc_context.get("common_features", [])
+        common_features_text = "\n".join(f"- {item}" for item in common_features) if common_features else "无特殊考虑"
+        
         # 生成最终文档
         markdown = _DOC_TEMPLATE.format(
             project_name=project_name,
             generated_time=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
             complexity=doc_context.get("complexity", "中等"),
             feature_count=doc_context.get("estimated_features", len(feature_list)),
+            domain_name=doc_context.get("domain_name", "通用系统"),
             project_summary=doc_context.get("project_summary", ""),
-            business_model=doc_context.get("business_model", task["business_model"] or "B2C 零售"),
-            target_market=doc_context.get("target_market", task["target_market"] or "全球"),
-            platforms=doc_context.get("platforms", task["platforms"] or "未指定"),
-            cross_border_notes=doc_context.get("cross_border_notes", "无特殊考虑"),
-            compliance_notes=doc_context.get("compliance_notes", "基础合规检查"),
+            business_model=doc_context.get("business_model", task["business_model"] or "通用"),
+            target_users=doc_context.get("target_users", "通用"),
+            core_modules_text=", ".join(core_modules),
+            common_features=common_features_text,
+            special_considerations=doc_context.get("special_considerations", "无"),
             architecture_diagram=doc_context.get("architecture_diagram", "graph TB\n    User[用户] --> Frontend[前端]\n    Frontend --> API[API 服务]"),
             module_overview=module_overview,
             feature_details_text=feature_details_text,
@@ -532,7 +535,7 @@ def _auto_assemble_and_save(task_id: str, task_log: logging.Logger):
 def submit_task_with_analysis(
     raw_requirement: str,
     save_directory: str = "",
-    detail_level: str = "详细",
+    detail_level: str = "标准",
 ) -> dict:
     """
     【推荐接口】提交原始需求，自动分析并生成任务。
@@ -540,7 +543,7 @@ def submit_task_with_analysis(
     Args:
         raw_requirement: 用户原始需求描述（自然语言）
         save_directory: 文件保存目录
-        detail_level: 详细程度
+        detail_level: 详细程度（简洁/标准/详细）
     
     Returns:
         包含 task_id, feature_count, questions 等信息的字典
@@ -556,8 +559,8 @@ def submit_task_with_analysis(
         feature_list=analyzed.feature_list,
         context=raw_requirement,
         business_model=analyzed.business_model.value,
-        target_market=analyzed.target_market,
-        platforms=", ".join(analyzed.platforms),
+        target_market=analyzed.target_users,
+        platforms="",
         detail_level=detail_level,
         doc_context=doc_context,
     )
@@ -565,10 +568,11 @@ def submit_task_with_analysis(
     return {
         "success": True,
         "task_id": task_id,
+        "domain": analyzed.domain.value,
+        "domain_name": analyzed.domain_name,
         "feature_count": analyzed.estimated_features,
         "complexity": analyzed.complexity.value,
         "core_modules": analyzed.core_modules,
-        "platforms": analyzed.platforms,
         "questions": analyzed.questions,  # 智能追问列表
         "message": f"已创建任务，将生成 {analyzed.estimated_features} 个功能点的详细需求文档",
     }

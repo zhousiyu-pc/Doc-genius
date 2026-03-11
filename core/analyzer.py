@@ -1,7 +1,8 @@
 """
-需求分析引擎
-============
+需求分析引擎（通用版）
+====================
 智能识别用户意图，评估复杂度，自动补充行业最佳实践。
+支持多领域：ERP、CRM、电商、OA、BI、App 等。
 目标：让用户输入最少，系统输出最多。
 """
 
@@ -17,11 +18,23 @@ logger = logging.getLogger("agent_skills.analyzer")
 
 # ── 枚举定义 ──────────────────────────────────────
 
+class Domain(str, Enum):
+    """文档领域"""
+    ERP = "erp"
+    CRM = "crm"
+    ECOMMERCE = "ecommerce"
+    OA = "oa"
+    BI = "bi"
+    APP = "app"
+    GENERAL = "general"
+
+
 class BusinessModel(str, Enum):
     """业务模式"""
     B2C = "B2C 零售"
     B2B = "B2B 批发"
-    MIXED = "混合模式"
+    INTERNAL = "内部管理"
+    PLATFORM = "平台服务"
     UNKNOWN = "未知"
 
 
@@ -35,20 +48,22 @@ class ComplexityLevel(str, Enum):
 # ── 数据结构 ──────────────────────────────────────
 
 @dataclass
-class PlatformInfo:
-    """平台信息"""
+class DomainInfo:
+    """领域信息"""
     name: str
-    api_type: str  # SP-API, API v2, etc.
-    integrations: list[str] = field(default_factory=list)
+    modules: list[str]
+    common_features: list[str]
+    special_considerations: list[str]
 
 
 @dataclass
 class AnalyzedRequirement:
     """分析后的需求"""
     # 基础信息
+    domain: Domain
+    domain_name: str
     business_model: BusinessModel
-    target_market: str
-    platforms: list[str]
+    target_users: str
     
     # 功能模块
     core_modules: list[str]
@@ -59,8 +74,8 @@ class AnalyzedRequirement:
     estimated_features: int
     
     # 智能补充
-    cross_border_features: list[str]
-    compliance_requirements: list[str]
+    common_features: list[str]
+    special_considerations: list[str]
     
     # 追问列表（如有缺失信息）
     questions: list[dict[str, str]]
@@ -69,75 +84,98 @@ class AnalyzedRequirement:
     raw_input: str
 
 
-# ── 知识库 ──────────────────────────────────────
+# ── 领域知识库 ──────────────────────────────────────
 
-PLATFORM_KNOWLEDGE = {
-    "amazon": PlatformInfo(
-        name="Amazon",
-        api_type="SP-API",
-        integrations=["FBA 库存同步", "自动定价", "广告数据", "订单拉取", "Feedback 管理"],
+DOMAIN_KNOWLEDGE = {
+    Domain.ERP: DomainInfo(
+        name="ERP 系统",
+        modules=["采购管理", "销售管理", "库存管理", "财务管理", "生产管理", "质量管理"],
+        common_features=["多组织架构", "多币种支持", "审批流程", "权限管理", "报表中心"],
+        special_considerations=[
+            "财务合规性（会计准则）",
+            "库存准确性（实时同步）",
+            "业务流程完整性",
+        ],
     ),
-    "亚马逊": PlatformInfo(
-        name="Amazon",
-        api_type="SP-API",
-        integrations=["FBA 库存同步", "自动定价", "广告数据", "订单拉取", "Feedback 管理"],
+    Domain.CRM: DomainInfo(
+        name="CRM 系统",
+        modules=["客户管理", "销售管理", "市场活动", "客服支持", "数据分析"],
+        common_features=["线索管理", "商机跟进", "客户画像", "销售漏斗", "跟进记录"],
+        special_considerations=[
+            "客户数据隐私保护",
+            "销售流程标准化",
+            "多渠道客户整合",
+        ],
     ),
-    "tiktok": PlatformInfo(
-        name="TikTok Shop",
-        api_type="TikTok Shop API",
-        integrations=["商品同步", "订单管理", "物流追踪", "达人带货", "直播数据"],
+    Domain.ECOMMERCE: DomainInfo(
+        name="电商平台",
+        modules=["商品管理", "订单管理", "支付结算", "物流管理", "营销推广", "售后服务"],
+        common_features=["多商家入驻", "库存同步", "促销规则", "评价系统", "退换货"],
+        special_considerations=[
+            "高并发订单处理",
+            "支付安全",
+            "物流配送时效",
+            "售后纠纷处理",
+        ],
     ),
-    "ebay": PlatformInfo(
-        name="eBay",
-        api_type="eBay API",
-        integrations=["刊登管理", "订单处理", "支付管理", "纠纷处理"],
+    Domain.OA: DomainInfo(
+        name="OA 办公系统",
+        modules=["审批流程", "考勤管理", "请假管理", "报销管理", "公告通知", "日程管理"],
+        common_features=["多级审批", "消息通知", "移动端支持", "集成 IM", "数据导出"],
+        special_considerations=[
+            "审批流程灵活性",
+            "消息及时送达",
+            "与现有系统集成",
+        ],
     ),
-    "shopee": PlatformInfo(
-        name="Shopee",
-        api_type="Shopee Open Platform",
-        integrations=["商品管理", "订单处理", "物流对接", "营销活动"],
+    Domain.BI: DomainInfo(
+        name="BI 数据分析平台",
+        modules=["数据源管理", "报表设计", "数据看板", "预警通知", "数据导出"],
+        common_features=["可视化图表", "定时刷新", "权限控制", "数据钻取", "多维分析"],
+        special_considerations=[
+            "数据安全性",
+            "查询性能优化",
+            "数据准确性校验",
+        ],
     ),
-    "lazada": PlatformInfo(
-        name="Lazada",
-        api_type="Lazada Open Platform",
-        integrations=["商品同步", "订单管理", "物流追踪"],
-    ),
-    "独立站": PlatformInfo(
-        name="独立站",
-        api_type="REST API",
-        integrations=["Shopify 对接", "WooCommerce 对接", "支付网关", "物流 API"],
+    Domain.APP: DomainInfo(
+        name="移动 App",
+        modules=["用户中心", "核心功能", "消息通知", "设置", "支付"],
+        common_features=["iOS/Android", "推送通知", "离线缓存", "版本更新", "第三方登录"],
+        special_considerations=[
+            "移动端性能优化",
+            "网络不稳定处理",
+            "应用商店审核规范",
+        ],
     ),
 }
 
-MODULE_KNOWLEDGE = {
-    "商品": ["商品录入", "商品同步", "库存管理", "价格管理", "图片管理", "分类管理"],
-    "订单": ["订单拉取", "订单处理", "订单审核", "订单拆分", "订单合并", "退换货"],
-    "物流": ["物流商管理", "运费计算", "运单生成", "物流追踪", "海外仓管理"],
-    "采购": ["智能采购", "采购建议", "供应商管理", "采购订单", "入库管理"],
-    "财务": ["利润核算", "成本计算", "对账管理", "多币种", "税务计算"],
-    "客服": ["消息聚合", "自动回复", "工单管理", "评价管理", "纠纷处理"],
-    "仓储": ["多仓库", "库存调拨", "盘点管理", "批次管理", "效期管理"],
-    "报表": ["销售报表", "利润报表", "库存报表", "绩效分析", "数据导出"],
+# 领域识别关键词
+DOMAIN_KEYWORDS = {
+    Domain.ERP: ["erp", "企业资源计划", "采购", "库存", "生产", "物料", "bom", "工单"],
+    Domain.CRM: ["crm", "客户关系", "销售", "线索", "商机", "客户管理", "跟进"],
+    Domain.ECOMMERCE: ["电商", "商城", "店铺", "商品", "订单", "卖家", "买家", "入驻"],
+    Domain.OA: ["oa", "办公", "审批", "考勤", "请假", "报销", "行政", "后勤"],
+    Domain.BI: ["bi", "数据看板", "报表", "分析", "可视化", "图表", " dashboard"],
+    Domain.APP: ["app", "移动应用", "ios", "android", "小程序", "手机"],
 }
 
-CROSS_BORDER_DEFAULTS = [
-    "多币种支持（USD/EUR/GBP/JPY 等）",
-    "多语言支持（英文/德文/法文/日文等）",
-    "时区自动转换",
-    "关税/VAT 计算",
-    "合规检查（CE/FCC/RoHS 等）",
-    "尺寸单位转换（公制/英制）",
-]
+# 业务模式识别关键词
+BUSINESS_MODEL_KEYWORDS = {
+    BusinessModel.B2C: ["零售", "个人", "消费者", "c 端", "买家"],
+    BusinessModel.B2B: ["批发", "企业", "供应商", "b 端", "采购"],
+    BusinessModel.INTERNAL: ["内部", "管理", "员工", "办公", "行政"],
+    BusinessModel.PLATFORM: ["平台", "多商家", "入驻", "开放", "生态"],
+}
 
 
 # ── 分析引擎 ──────────────────────────────────────
 
 class RequirementAnalyzer:
-    """需求分析引擎"""
+    """需求分析引擎（通用版）"""
     
     def __init__(self):
-        self.platform_knowledge = PLATFORM_KNOWLEDGE
-        self.module_knowledge = MODULE_KNOWLEDGE
+        self.domain_knowledge = DOMAIN_KNOWLEDGE
     
     def analyze(self, raw_input: str) -> AnalyzedRequirement:
         """
@@ -149,164 +187,172 @@ class RequirementAnalyzer:
         Returns:
             分析后的需求对象
         """
-        # 1. 业务模式识别
+        # 1. 领域识别
+        domain = self._identify_domain(raw_input)
+        
+        # 2. 业务模式识别
         business_model = self._identify_business_model(raw_input)
         
-        # 2. 目标市场识别
-        target_market = self._identify_target_market(raw_input)
-        
-        # 3. 平台识别
-        platforms = self._identify_platforms(raw_input)
+        # 3. 目标用户识别
+        target_users = self._identify_target_users(raw_input)
         
         # 4. 核心模块识别
-        core_modules = self._identify_modules(raw_input)
+        core_modules = self._identify_modules(raw_input, domain)
         
         # 5. 功能点拆解
-        feature_list = self._generate_features(core_modules, platforms)
+        feature_list = self._generate_features(raw_input, domain, core_modules)
         
         # 6. 复杂度评估
         complexity = self._evaluate_complexity(feature_list, raw_input)
         
-        # 7. 跨境电商特性补充
-        cross_border_features = self._add_cross_border_features(
-            business_model, target_market
-        )
+        # 7. 通用特性补充
+        domain_info = self.domain_knowledge.get(domain, DOMAIN_KNOWLEDGE[Domain.GENERAL])
+        common_features = domain_info.common_features[:5]
+        special_considerations = domain_info.special_considerations
         
-        # 8. 合规要求补充
-        compliance_requirements = self._add_compliance_requirements(target_market)
-        
-        # 9. 智能追问（检测缺失信息）
-        questions = self._generate_questions(
-            business_model, platforms, core_modules, raw_input
-        )
+        # 8. 智能追问（检测缺失信息）
+        questions = self._generate_questions(domain, core_modules, raw_input)
         
         return AnalyzedRequirement(
+            domain=domain,
+            domain_name=domain_info.name,
             business_model=business_model,
-            target_market=target_market,
-            platforms=platforms,
+            target_users=target_users,
             core_modules=core_modules,
             feature_list=feature_list,
             complexity=complexity,
-            estimated_features=len(feature_list) + len(cross_border_features),
-            cross_border_features=cross_border_features,
-            compliance_requirements=compliance_requirements,
+            estimated_features=len(feature_list) + len(common_features),
+            common_features=common_features,
+            special_considerations=special_considerations,
             questions=questions,
             raw_input=raw_input,
         )
     
+    def _identify_domain(self, text: str) -> Domain:
+        """识别文档所属领域"""
+        text_lower = text.lower()
+        scores = {}
+        
+        for domain, keywords in DOMAIN_KEYWORDS.items():
+            scores[domain] = sum(1 for kw in keywords if kw in text_lower)
+        
+        # 返回得分最高的领域
+        if max(scores.values()) > 0:
+            return max(scores, key=scores.get)
+        
+        return Domain.GENERAL
+    
     def _identify_business_model(self, text: str) -> BusinessModel:
         """识别业务模式"""
         text_lower = text.lower()
+        scores = {}
         
-        if any(kw in text_lower for kw in ["批发", "b2b", "企业采购", "大宗"]):
-            return BusinessModel.B2B
-        elif any(kw in text_lower for kw in ["零售", "b2c", "个人", "消费者"]):
-            return BusinessModel.B2C
-        elif any(kw in text_lower for kw in ["混合", "both", "b2b2c"]):
-            return BusinessModel.MIXED
+        for model, keywords in BUSINESS_MODEL_KEYWORDS.items():
+            scores[model] = sum(1 for kw in keywords if kw in text_lower)
+        
+        if max(scores.values()) > 0:
+            return max(scores, key=scores.get)
+        
+        return BusinessModel.UNKNOWN
+    
+    def _identify_target_users(self, text: str) -> str:
+        """识别目标用户"""
+        text_lower = text.lower()
+        
+        if any(kw in text_lower for kw in ["中小", "小微企业", "初创"]):
+            return "中小企业"
+        elif any(kw in text_lower for kw in ["大型", "集团", "企业"]):
+            return "大型企业"
+        elif any(kw in text_lower for kw in ["个人", "消费者"]):
+            return "个人用户"
+        elif any(kw in text_lower for kw in ["内部", "员工"]):
+            return "内部员工"
         else:
-            # 默认根据平台推断
-            return BusinessModel.B2C
+            return "通用"
     
-    def _identify_target_market(self, text: str) -> str:
-        """识别目标市场"""
-        text_lower = text.lower()
-        
-        markets = {
-            "北美": ["北美", "美国", "加拿大", "美利坚", "usa", "us"],
-            "欧洲": ["欧洲", "英国", "德国", "法国", "意大利", "西班牙", "eu"],
-            "东南亚": ["东南亚", "泰国", "越南", "印尼", "马来西亚", "菲律宾"],
-            "日本": ["日本", "日亚", "jp"],
-            "中东": ["中东", "沙特", "阿联酋", "迪拜"],
-            "全球": ["全球", "全世界", "worldwide", "global"],
-        }
-        
-        for market, keywords in markets.items():
-            if any(kw in text_lower for kw in keywords):
-                return market
-        
-        return "全球"  # 默认
-    
-    def _identify_platforms(self, text: str) -> list[str]:
-        """识别销售平台"""
-        text_lower = text.lower()
-        platforms = []
-        
-        for key, info in self.platform_knowledge.items():
-            if key in text_lower:
-                if info.name not in platforms:
-                    platforms.append(info.name)
-        
-        # 智能推断
-        if not platforms:
-            # 提到"跨境"但未指定平台，默认包含主流平台
-            if any(kw in text_lower for kw in ["跨境", "电商", "erp"]):
-                platforms = ["Amazon", "TikTok Shop"]
-        
-        return platforms if platforms else ["未指定"]
-    
-    def _identify_modules(self, text: str) -> list[str]:
+    def _identify_modules(self, text: str, domain: Domain) -> list[str]:
         """识别核心功能模块"""
         text_lower = text.lower()
         modules = []
         
-        for module, features in self.module_knowledge.items():
+        domain_info = self.domain_knowledge.get(domain)
+        if not domain_info:
+            return ["核心功能"]
+        
+        for module in domain_info.modules:
             # 直接匹配模块名
-            if module in text_lower:
+            if any(kw in text_lower for kw in module.lower()):
                 modules.append(module)
                 continue
             
-            # 匹配模块下的功能关键词
-            for feature in features:
-                if feature in text_lower:
+            # 匹配模块关键词
+            for kw in ["管理", "功能", "模块"]:
+                if module.replace("管理", "") in text_lower:
                     if module not in modules:
                         modules.append(module)
                     break
         
         # 智能推断
         if not modules:
-            # 提到"erp"默认包含核心模块
-            if "erp" in text_lower:
-                modules = ["商品", "订单", "物流", "财务"]
-        
-        # 至少要有核心模块
-        if not modules:
-            modules = ["商品", "订单"]
+            # 如果未指定模块，返回领域的前 3 个核心模块
+            modules = domain_info.modules[:3]
         
         return modules
     
     def _generate_features(
-        self, modules: list[str], platforms: list[str]
+        self, raw_input: str, domain: Domain, modules: list[str]
     ) -> list[str]:
-        """根据模块和平台生成详细功能点列表"""
+        """根据领域和模块生成详细功能点列表"""
         features = []
+        domain_info = self.domain_knowledge.get(domain)
         
-        # 1. 添加模块下的核心功能
+        if not domain_info:
+            # 通用领域，根据模块名生成
+            for module in modules:
+                features.extend([
+                    f"{module} - 基础功能",
+                    f"{module} - 列表查看",
+                    f"{module} - 新增/编辑",
+                    f"{module} - 删除",
+                ])
+            return features
+        
+        # 为每个模块生成 3-5 个功能点
         for module in modules:
-            module_features = self.module_knowledge.get(module, [])
-            # 根据模块重要性选择功能数量
-            if module in ["商品", "订单"]:
-                # 核心模块，包含所有功能
-                features.extend(module_features[:4])
-            else:
-                # 其他模块，选 2-3 个核心功能
-                features.extend(module_features[:3])
+            # 查找模块在知识库中的索引
+            module_idx = -1
+            for i, m in enumerate(domain_info.modules):
+                if module in m or m in module:
+                    module_idx = i
+                    break
+            
+            if module_idx >= 0:
+                # 根据模块重要性选择功能数量
+                if module_idx < 2:
+                    # 核心模块，生成 5 个功能点
+                    features.extend([
+                        f"{module} - 基础设置",
+                        f"{module} - 列表查看",
+                        f"{module} - 新增/导入",
+                        f"{module} - 编辑/更新",
+                        f"{module} - 删除/归档",
+                    ])
+                else:
+                    # 其他模块，生成 3 个功能点
+                    features.extend([
+                        f"{module} - 基础功能",
+                        f"{module} - 核心操作",
+                        f"{module} - 查询统计",
+                    ])
         
-        # 2. 添加平台特有功能
-        for platform in platforms:
-            platform_info = self.platform_knowledge.get(platform)
-            if platform_info:
-                features.extend(platform_info.integrations[:3])
+        # 添加通用功能
+        features.extend([
+            "系统管理 - 用户管理",
+            "系统管理 - 角色权限",
+            "系统管理 - 操作日志",
+        ])
         
-        # 去重
-        seen = set()
-        unique_features = []
-        for f in features:
-            if f not in seen:
-                seen.add(f)
-                unique_features.append(f)
-        
-        return unique_features
+        return features
     
     def _evaluate_complexity(
         self, features: list[str], raw_input: str
@@ -318,8 +364,9 @@ class RequirementAnalyzer:
         # 检测高级关键词
         advanced_keywords = [
             "智能", "自动", "ai", "算法", "预测",
-            "多仓库", "海外仓", "fba",
-            "财务", "核算", "税务",
+            "多组织", "多租户", "saas",
+            "高并发", "分布式", "微服务",
+            "集成", "对接", "api",
             "定制", "私有化", "源码",
         ]
         
@@ -328,39 +375,16 @@ class RequirementAnalyzer:
         )
         
         # 复杂度判定
-        if feature_count <= 5 and advanced_count <= 1:
+        if feature_count <= 8 and advanced_count <= 1:
             return ComplexityLevel.SIMPLE
-        elif feature_count <= 15 and advanced_count <= 3:
+        elif feature_count <= 20 and advanced_count <= 3:
             return ComplexityLevel.MEDIUM
         else:
             return ComplexityLevel.COMPLEX
     
-    def _add_cross_border_features(
-        self, business_model: BusinessModel, target_market: str
-    ) -> list[str]:
-        """添加跨境电商特有功能"""
-        # 只有跨境电商才需要这些
-        if target_market == "全球" or business_model in [BusinessModel.B2C, BusinessModel.MIXED]:
-            return CROSS_BORDER_DEFAULTS[:4]  # 选 4 个核心的
-        return []
-    
-    def _add_compliance_requirements(self, target_market: str) -> list[str]:
-        """添加合规要求"""
-        compliance = []
-        
-        if target_market in ["北美", "全球"]:
-            compliance.extend(["FCC 认证", "FDA 注册（如适用）"])
-        if target_market in ["欧洲", "全球"]:
-            compliance.extend(["CE 认证", "VAT 税务合规", "GDPR 数据保护"])
-        if target_market in ["日本", "全球"]:
-            compliance.extend(["PSE 认证", "日本消费税"])
-        
-        return compliance if compliance else ["基础合规检查"]
-    
     def _generate_questions(
         self,
-        business_model: BusinessModel,
-        platforms: list[str],
+        domain: Domain,
         modules: list[str],
         raw_input: str,
     ) -> list[dict[str, str]]:
@@ -368,45 +392,74 @@ class RequirementAnalyzer:
         questions = []
         text_lower = raw_input.lower()
         
-        # 检测多仓库但未说明位置
-        if ("仓库" in text_lower or "仓储" in text_lower) and "海外仓" not in text_lower:
+        # 通用追问（所有领域都适用）
+        if "用户" not in text_lower and "人" not in text_lower:
             questions.append({
-                "field": "warehouse_locations",
-                "question": "您的仓库分布在哪些地区？（如：国内仓、美国仓、欧洲仓）",
-                "options": ["仅国内仓", "国内 + 海外仓", "纯海外仓", "暂不确定"],
+                "field": "user_scale",
+                "question": "预计用户数量？",
+                "options": ["<50 人", "50-200 人", "200-500 人", "500+ 人"],
             })
         
-        # 检测自动采购但未说明策略
-        if ("自动采购" in text_lower or "智能采购" in text_lower) and "采购" in modules:
-            questions.append({
-                "field": "purchase_strategy",
-                "question": "自动采购的触发规则是？",
-                "options": ["库存低于安全值", "基于销售预测", "定期补货", "手动配置"],
-            })
+        # 领域特定追问
+        if domain == Domain.ERP:
+            if "财务" in modules and "币种" not in text_lower:
+                questions.append({
+                    "field": "currency",
+                    "question": "是否需要多币种支持？",
+                    "options": ["单币种（人民币）", "多币种（USD/EUR 等）"],
+                })
+            if "库存" in modules and "仓库" not in text_lower:
+                questions.append({
+                    "field": "warehouse",
+                    "question": "仓库分布情况？",
+                    "options": ["单仓库", "多仓库", "多地仓库"],
+                })
         
-        # 检测财务但未说明币种
-        if "财务" in modules and "币种" not in text_lower and "货币" not in text_lower:
-            questions.append({
-                "field": "base_currency",
-                "question": "您的本位币是？",
-                "options": ["人民币 CNY", "美元 USD", "欧元 EUR", "多币种"],
-            })
+        elif domain == Domain.CRM:
+            if "销售" in modules and "线索" not in text_lower:
+                questions.append({
+                    "field": "lead_source",
+                    "question": "线索来源渠道？",
+                    "options": ["线上渠道", "线下渠道", "多渠道整合"],
+                })
         
-        # 检测物流但未说明物流商
-        if "物流" in modules and "物流商" not in text_lower and "快递" not in text_lower:
-            questions.append({
-                "field": "logistics_providers",
-                "question": "您主要使用哪些物流商？",
-                "options": ["国际快递（DHL/FedEx/UPS）", "专线物流", "海外仓配", "平台物流（FBA 等）"],
-            })
+        elif domain == Domain.ECOMMERCE:
+            if "支付" not in text_lower:
+                questions.append({
+                    "field": "payment",
+                    "question": "需要对接哪些支付方式？",
+                    "options": ["微信支付", "支付宝", "银行卡", "全都要"],
+                })
+            if "物流" in modules and "快递" not in text_lower:
+                questions.append({
+                    "field": "logistics",
+                    "question": "主要合作的物流公司？",
+                    "options": ["顺丰", "三通一达", "京东物流", "多家混合"],
+                })
         
-        # 平台特定追问
-        if "Amazon" in platforms and "fba" not in text_lower:
-            questions.append({
-                "field": "fba_usage",
-                "question": "是否使用 FBA 服务？",
-                "options": ["是，主要用 FBA", "部分使用", "不用，自发货"],
-            })
+        elif domain == Domain.OA:
+            if "审批" in modules:
+                questions.append({
+                    "field": "approval_levels",
+                    "question": "审批流程复杂度？",
+                    "options": ["单级审批", "多级审批", "动态审批流"],
+                })
+        
+        elif domain == Domain.BI:
+            if "数据" in text_lower and "源" not in text_lower:
+                questions.append({
+                    "field": "data_source",
+                    "question": "数据来源？",
+                    "options": ["现有数据库", "API 接口", "Excel 导入", "混合来源"],
+                })
+        
+        elif domain == Domain.APP:
+            if "ios" not in text_lower and "android" not in text_lower:
+                questions.append({
+                    "field": "platform",
+                    "question": "目标平台？",
+                    "options": ["iOS", "Android", "双平台", "小程序"],
+                })
         
         return questions
     
@@ -416,22 +469,21 @@ class RequirementAnalyzer:
         用于传递给文档生成引擎。
         """
         return {
-            "project_name": f"{analyzed.business_model.value}跨境电商 ERP 系统",
+            "project_name": f"{analyzed.domain_name}需求规格说明书",
             "project_summary": (
-                f"面向{analyzed.target_market}市场的{analyzed.business_model.value}跨境电商 ERP，"
-                f"支持{', '.join(analyzed.platforms)}平台，"
+                f"面向{analyzed.target_users}的{analyzed.domain_name}，"
+                f"业务模式：{analyzed.business_model.value}，"
                 f"涵盖{', '.join(analyzed.core_modules)}等核心模块。"
             ),
+            "domain": analyzed.domain.value,
+            "domain_name": analyzed.domain_name,
             "business_model": analyzed.business_model.value,
-            "target_market": analyzed.target_market,
-            "platforms": ", ".join(analyzed.platforms),
+            "target_users": analyzed.target_users,
             "core_modules": analyzed.core_modules,
             "feature_list": analyzed.feature_list,
-            "cross_border_notes": "\n".join(
-                f"- {item}" for item in analyzed.cross_border_features
-            ),
-            "compliance_notes": "\n".join(
-                f"- {item}" for item in analyzed.compliance_requirements
+            "common_features": analyzed.common_features,
+            "special_considerations": "\n".join(
+                f"- {item}" for item in analyzed.special_considerations
             ),
             "complexity": analyzed.complexity.value,
             "estimated_features": analyzed.estimated_features,

@@ -1,7 +1,7 @@
 """
-任务管理 Skill — REST API 路由（优化版）
+任务管理 Skill — REST API 路由（通用版）
 ======================================
-新增智能分析接口，支持自然语言需求输入。
+支持多领域文档生成，不依赖 Dify。
 """
 
 import logging
@@ -26,33 +26,36 @@ logger = logging.getLogger("agent_skills.task_manager")
 
 async def api_analyze_requirement(request: Request) -> JSONResponse:
     """
-    POST /api/tasks/analyze — 智能分析需求并创建任务（推荐接口）
+    POST /api/analyze — 智能分析需求并创建任务（推荐接口）
     
-    用户只需输入自然语言需求，系统自动分析并生成详细功能点列表。
+    用户只需输入自然语言需求，系统自动分析领域、拆解功能点并生成文档。
     
     请求体 JSON：
     {
-        "requirement": "我想做一个跨境电商 ERP，主要卖亚马逊和 TikTok...",
-        "save_directory": "~/Documents/ERP 需求文档",  // 可选
-        "detail_level": "详细"  // 可选，默认"详细"
+        "requirement": "我想做一个 CRM 系统，管理客户信息、销售跟进",
+        "options": {
+            "detail_level": "标准",  // 简洁/标准/详细
+            "output_format": "markdown"  // markdown/pdf/word
+        }
     }
     
     响应示例：
     {
         "success": true,
         "task_id": "a1b2c3d4e5f6",
-        "feature_count": 18,
+        "domain": "crm",
+        "domain_name": "CRM 系统",
+        "feature_count": 16,
         "complexity": "中等",
-        "core_modules": ["商品", "订单", "物流", "采购"],
-        "platforms": ["Amazon", "TikTok Shop"],
+        "core_modules": ["客户管理", "销售管理", "合同管理"],
         "questions": [
             {
-                "field": "warehouse_locations",
-                "question": "您的仓库分布在哪些地区？",
-                "options": ["仅国内仓", "国内 + 海外仓", "纯海外仓"]
+                "field": "user_scale",
+                "question": "预计用户数量？",
+                "options": ["<50 人", "50-200 人", "200-500 人"]
             }
         ],
-        "message": "已创建任务，将生成 18 个功能点的详细需求文档"
+        "message": "已创建任务，将生成 16 个功能点的详细需求文档"
     }
     """
     try:
@@ -80,8 +83,11 @@ async def api_analyze_requirement(request: Request) -> JSONResponse:
         result = submit_task_with_analysis(
             raw_requirement=requirement,
             save_directory=body.get("save_directory", ""),
-            detail_level=body.get("detail_level", "详细"),
+            detail_level=body.get("options", {}).get("detail_level", "标准"),
         )
+        
+        # 添加领域信息到响应
+        result["domain"] = body.get("domain", "")
         
         return JSONResponse(result)
     
@@ -104,8 +110,7 @@ async def api_submit_task(request: Request) -> JSONResponse:
         "business_model": "B2C 零售",
         "target_market": "北美",
         "platforms": "Amazon, Shopify",
-        "detail_level": "详细",
-        "doc_context": {}  // 可选，文档汇总上下文
+        "detail_level": "详细"
     }
     """
     try:
@@ -234,7 +239,7 @@ def _build_results_response(task_id: str) -> dict | None:
 
 
 async def api_task_results(request: Request) -> JSONResponse:
-    """GET /api/tasks/{task_id}/results — 获取任务结果"""
+    """GET /api/tasks/{task_id}/result — 获取任务结果"""
     task_id = request.path_params["task_id"]
 
     data = _build_results_response(task_id)
@@ -252,14 +257,6 @@ async def api_retry_failed(request: Request) -> JSONResponse:
     return JSONResponse(result, status_code=status_code)
 
 
-async def api_sync_task(request: Request) -> JSONResponse:
-    """POST /api/tasks/{task_id}/sync — 同步任务计数"""
-    task_id = request.path_params["task_id"]
-    result = sync_task_counts(task_id)
-    status_code = 200 if result["success"] else 404
-    return JSONResponse(result, status_code=status_code)
-
-
 async def api_resume_task(request: Request) -> JSONResponse:
     """POST /api/tasks/{task_id}/resume — 恢复执行未完成的任务"""
     task_id = request.path_params["task_id"]
@@ -269,18 +266,13 @@ async def api_resume_task(request: Request) -> JSONResponse:
 
 
 routes = [
-    # 🆕 智能分析接口（推荐）
-    Route("/api/tasks/analyze", api_analyze_requirement, methods=["POST"]),
+    # 🆕 智能分析接口（推荐，通用版）
+    Route("/api/analyze", api_analyze_requirement, methods=["POST"]),
     
     # 传统接口（兼容）
     Route("/api/tasks", api_submit_task, methods=["POST"]),
-    
-    # 任务查询
     Route("/api/tasks/{task_id}", api_task_status, methods=["GET"]),
-    Route("/api/tasks/{task_id}/results", api_task_results, methods=["GET"]),
-    
-    # 任务控制
+    Route("/api/tasks/{task_id}/result", api_task_results, methods=["GET"]),
     Route("/api/tasks/{task_id}/retry", api_retry_failed, methods=["POST"]),
     Route("/api/tasks/{task_id}/resume", api_resume_task, methods=["POST"]),
-    Route("/api/tasks/{task_id}/sync", api_sync_task, methods=["POST"]),
 ]

@@ -1,6 +1,6 @@
-# Agent Skills Server - ERP 需求文档智能生成器
+# 智能文档生成器
 
-> 让需求文档生成像聊天一样简单！
+> 让文档生成像聊天一样简单！
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
@@ -8,11 +8,14 @@
 
 ---
 
-## 🎯 产品理念
+## 🎯 产品定位
 
-**用户输入最小化，系统输出最大化**
+**通用型智能文档生成平台**
 
-让用户只说"想要什么"，系统自动补充"怎么做"。
+- 🌐 **多领域支持** - ERP、CRM、电商、OA、BI、App 等任意系统
+- 📱 **多端访问** - Web 端 + 移动端（iOS/Android/小程序）
+- 🤖 **智能分析** - 自然语言输入，自动识别需求、补充细节
+- 📄 **专业输出** - 5W2H + 测试驱动的结构化文档
 
 ---
 
@@ -20,43 +23,44 @@
 
 ### 1. 极简输入
 
-用户只需输入自然语言需求，例如：
+用户只需输入自然语言需求：
 ```
-我想做一个跨境电商 ERP，主要卖亚马逊和 TikTok，
-需要管理商品、订单、物流，最好能自动采购和智能定价。
+"我想做一个 CRM 系统，管理客户信息、销售跟进、合同管理"
+"做一个类似淘宝的电商平台，支持多商家入驻"
+"需要一个员工请假审批系统，支持多级审批"
 ```
 
 ### 2. 智能分析
 
 系统自动识别并补充：
-- ✅ 业务模式（B2C/B2B/混合）
-- ✅ 目标市场（北美/欧洲/东南亚等）
-- ✅ 对接平台（Amazon/TikTok/eBay 等）
-- ✅ 核心模块（商品/订单/物流/财务等）
-- ✅ 功能点拆解（15-20 个详细功能点）
-- ✅ 行业最佳实践（多币种、关税、合规等）
+- ✅ **领域识别** - ERP/CRM/电商/OA/BI/App
+- ✅ **业务模式** - B2B/B2C/内部管理
+- ✅ **核心模块** - 自动拆解功能模块
+- ✅ **功能点** - 15-30 个详细功能点
+- ✅ **行业实践** - 自动融入领域最佳实践
 
 ### 3. 智能追问
 
 检测到缺失信息时主动追问：
 ```
-❓ 您的仓库分布在哪些地区？
-❓ 自动采购的触发规则是？
-❓ 您的本位币是？
+❓ 您的主要使用场景是？
+❓ 需要对接哪些系统？
+❓ 预计用户数量？
+❓ 文档详细程度？
 ```
 
 ### 4. 5W2H + 测试驱动文档
 
 每个功能点包含完整要素：
-- **Why** - 业务背景（目标、价值、角色、频率、优先级）
-- **What** - 功能说明（概述、前置条件、后置结果、业务规则）
-- **Input** - 输入设计（用户输入表格、系统输入）
-- **Output** - 输出设计（用户可见输出、系统输出）
-- **How** - 功能流程（用户操作流程、系统处理流程、状态流转）
-- **Interface** - 接口设计（内部 API、外部 API、数据模型）
-- **Test** - 测试覆盖（功能用例、边界测试、异常场景、性能要求）
-- **Security** - 安全设计（权限、脱敏、审计）
-- **Notes** - 特殊说明（跨境特性、技术难点）
+- **Why** - 业务背景
+- **What** - 功能说明
+- **Input** - 输入设计
+- **Output** - 输出设计
+- **How** - 功能流程
+- **Interface** - 接口设计
+- **Test** - 测试覆盖
+- **Security** - 安全设计
+- **Notes** - 特殊说明
 
 ---
 
@@ -80,7 +84,7 @@ export LLM_API_KEY="sk-你的 APIKey"
 
 # 5. 访问服务
 # API: http://localhost:8766
-# 健康检查：http://localhost:8766/api/health
+# Web: http://localhost:3000 (待开发)
 ```
 
 ### 方式二：Docker 运行
@@ -100,14 +104,17 @@ docker-compose logs -f
 
 ## 📡 API 使用
 
-### 智能分析并生成需求文档（推荐）
+### 智能分析并生成文档（推荐）
 
 ```bash
-curl -X POST http://localhost:8766/api/tasks/analyze \
+curl -X POST http://localhost:8766/api/analyze \
   -H "Content-Type: application/json" \
   -d '{
-    "requirement": "我想做一个跨境电商 ERP，主要卖亚马逊和 TikTok，需要管理商品、订单、物流",
-    "save_directory": "~/Documents/ERP 需求文档"
+    "requirement": "我想做一个 CRM 系统，管理客户信息、销售跟进",
+    "options": {
+      "detail_level": "标准",
+      "output_format": "markdown"
+    }
   }'
 ```
 
@@ -116,18 +123,18 @@ curl -X POST http://localhost:8766/api/tasks/analyze \
 {
   "success": true,
   "task_id": "a1b2c3d4e5f6",
-  "feature_count": 18,
+  "domain": "crm",
+  "feature_count": 16,
   "complexity": "中等",
-  "core_modules": ["商品", "订单", "物流", "采购"],
-  "platforms": ["Amazon", "TikTok Shop"],
+  "modules": ["客户管理", "销售管理", "合同管理"],
   "questions": [
     {
-      "field": "warehouse_locations",
-      "question": "您的仓库分布在哪些地区？",
-      "options": ["仅国内仓", "国内 + 海外仓", "纯海外仓"]
+      "field": "scenario",
+      "question": "您的主要使用场景是？",
+      "options": ["销售团队管理", "客户整合", "客服支持"]
     }
   ],
-  "message": "已创建任务，将生成 18 个功能点的详细需求文档"
+  "message": "已创建任务，将生成 16 个功能点的详细需求文档"
 }
 ```
 
@@ -137,40 +144,39 @@ curl -X POST http://localhost:8766/api/tasks/analyze \
 curl http://localhost:8766/api/tasks/a1b2c3d4e5f6
 ```
 
-### 获取任务结果
+### 获取文档结果
 
 ```bash
-curl http://localhost:8766/api/tasks/a1b2c3d4e5f6/results
+curl http://localhost:8766/api/tasks/a1b2c3d4e5f6/result
+```
+
+### 导出文档
+
+```bash
+# 导出 PDF
+curl -X POST http://localhost:8766/api/documents/{id}/export \
+  -H "Content-Type: application/json" \
+  -d '{"format": "pdf"}'
+
+# 导出 Word
+curl -X POST http://localhost:8766/api/documents/{id}/export \
+  -H "Content-Type: application/json" \
+  -d '{"format": "docx"}'
 ```
 
 ---
 
-## 📊 系统架构
+## 🌐 支持领域
 
-```mermaid
-graph TB
-    User[用户] -->|输入需求大纲 | Frontend[前端]
-    Frontend -->|结构化需求 | Analyzer[需求分析引擎]
-    
-    Analyzer -->|1. 意图识别 | Classifier[分类器]
-    Analyzer -->|2. 复杂度评估 | Evaluator[评估器]
-    Analyzer -->|3. 缺失信息检测 | Detector[检测器]
-    
-    Classifier -->|业务类型 | Templates[行业模板库]
-    Evaluator -->|复杂度等级 | Strategy[生成策略]
-    Detector -->|追问列表 | Questions[智能追问]
-    
-    Templates -->|模板 + 定制 | Generator[文档生成引擎]
-    Strategy -->|生成参数 | Generator
-    
-    Generator -->|并行处理 | Workers[Worker 池]
-    Workers -->|调用 | LLM[通义千问 API]
-    Workers -->|存储 | DB[(SQLite)]
-    
-    DB -->|汇总 | Assembler[文档汇编器]
-    Assembler -->|最终文档 | Output[输出服务]
-    Output -->|Markdown/PDF | User
-```
+| 领域 | 典型场景 | 核心模块 |
+|------|----------|----------|
+| 📊 **ERP** | 企业资源计划 | 采购、销售、库存、财务、生产 |
+| 💼 **CRM** | 客户关系管理 | 客户管理、销售、市场、客服 |
+| 🛒 **电商** | 电商平台/商城 | 商品、订单、支付、物流、营销 |
+| 🏢 **OA** | 办公自动化 | 审批、考勤、请假、报销、公告 |
+| 📈 **BI** | 数据分析看板 | 数据源、报表、可视化、预警 |
+| 📱 **App** | 移动应用 | 用户中心、核心功能、消息、支付 |
+| 🎮 **其他** | 任意系统 | 自定义模块和功能 |
 
 ---
 
@@ -179,25 +185,26 @@ graph TB
 ```
 agents/
 ├── core/                       # 核心基础设施
-│   ├── config.py               # 全局配置（支持环境变量）
-│   ├── db.py                   # SQLite 数据库管理
-│   ├── llm_client.py           # 通义千问 API 客户端
+│   ├── config.py               # 全局配置
+│   ├── db.py                   # 数据库管理
+│   ├── llm_client.py           # LLM API 客户端
 │   ├── logger.py               # 日志管理
-│   └── analyzer.py             # 🆕 需求分析引擎
-├── skills/                     # Skill 模块
+│   └── analyzer.py             # 需求分析引擎
+├── skills/                     # 技能模块
 │   ├── file_saver/             # 文件保存
-│   │   ├── service.py
-│   │   ├── routes.py
-│   │   └── mcp_tools.py
-│   └── task_manager/           # 🆕 任务管理（集成智能分析）
-│       ├── service.py
-│       └── routes.py
-├── dify_apps/                  # Dify 应用配置
-├── Dockerfile                  # 🆕 Docker 镜像
-├── docker-compose.yml          # 🆕 Docker Compose
-├── requirements.txt            # 🆕 Python 依赖
-├── .gitignore                  # 🆕 Git 忽略
-├── DESIGN.md                   # 🆕 产品设计方案
+│   └── task_manager/           # 任务管理
+├── web/                        # Web 前端（待开发）
+│   ├── src/
+│   ├── public/
+│   └── package.json
+├── mobile/                     # 移动端（待开发）
+│   ├── src/
+│   └── manifest.json
+├── Dockerfile                  # Docker 镜像
+├── docker-compose.yml          # Docker Compose
+├── requirements.txt            # Python 依赖
+├── DESIGN.md                   # 产品设计方案
+├── README.md                   # 使用说明
 ├── start.sh                    # 启动脚本
 ├── stop.sh                     # 停止脚本
 └── main.py                     # 统一入口
@@ -213,62 +220,154 @@ agents/
 |------|--------|------|
 | `LLM_API_KEY` | (必填) | 通义千问 API Key |
 | `LLM_MODEL` | qwen-plus | 模型名称 |
-| `SKILLS_PORT` | 8766 | 服务端口 |
+| `SERVER_PORT` | 8766 | 服务端口 |
 | `TASK_WORKERS` | 3 | 并发 Worker 数量 |
-| `SKILLS_DATA_DIR` | ~/.agent_skills | 数据存储目录 |
-| `DEFAULT_SAVE_DIR` | ~/Documents/ERP 需求文档 | 默认保存目录 |
+| `DATA_DIR` | ~/.doc_generator | 数据存储目录 |
+| `DEFAULT_OUTPUT_FORMAT` | markdown | 默认输出格式 |
 | `DEBUG` | false | 调试模式 |
-
-### 配置方式
-
-```bash
-# 方式 1：环境变量
-export LLM_API_KEY="sk-xxx"
-export TASK_WORKERS=5
-
-# 方式 2：.env 文件
-cp .env.example .env
-# 编辑 .env 文件
-
-# 方式 3：启动参数
-./start.sh --llm-key "sk-xxx" --workers 5
-```
 
 ---
 
-## 📝 输出文档示例
+## 🎨 前端集成示例
 
-最终生成的需求文档包含：
+### Web 端（Vue 3）
 
-```markdown
-# B2C 零售跨境电商 ERP 系统 - 需求规格说明书
+```vue
+<template>
+  <div class="doc-generator">
+    <h1>📝 智能文档生成器</h1>
+    
+    <!-- 输入区域 -->
+    <el-input
+      v-model="requirement"
+      type="textarea"
+      :rows="4"
+      placeholder="你想创建什么文档？例如：我想做一个 CRM 系统..."
+    />
+    
+    <el-button type="primary" @click="generate">
+      ✨ 开始生成
+    </el-button>
+    
+    <!-- 进度显示 -->
+    <el-progress 
+      v-if="generating" 
+      :percentage="progress" 
+      :status="status"
+    />
+    
+    <!-- 结果预览 -->
+    <markdown-preview v-if="document" :content="document" />
+  </div>
+</template>
 
-> 文档版本：1.0  
-> 生成时间：2026-03-11 11:00  
-> 复杂度：中等 | 预估功能点：18
+<script setup>
+import { ref } from 'vue'
+import axios from 'axios'
 
-## 一、项目概述
-### 1.1 业务背景
-面向全球市场的 B2C 零售跨境电商 ERP...
+const requirement = ref('')
+const generating = ref(false)
+const progress = ref(0)
+const document = ref(null)
 
-### 1.2 跨境电商特有考虑
-- 多币种支持（USD/EUR/GBP/JPY 等）
-- 多语言支持（英文/德文/法文/日文等）
-- 时区自动转换
-- 关税/VAT 计算
+const generate = async () => {
+  generating.value = true
+  
+  // 创建任务
+  const { data } = await axios.post('/api/analyze', {
+    requirement: requirement.value
+  })
+  
+  // 轮询进度
+  pollProgress(data.task_id)
+}
 
-## 二、系统架构
-...
+const pollProgress = async (taskId) => {
+  const timer = setInterval(async () => {
+    const { data } = await axios.get(`/api/tasks/${taskId}`)
+    
+    progress.value = Math.round(
+      (data.completed_count / data.total_count) * 100
+    )
+    
+    if (data.status === 'completed') {
+      clearInterval(timer)
+      // 获取结果
+      const result = await axios.get(`/api/tasks/${taskId}/result`)
+      document.value = result.data.content
+      generating.value = false
+    }
+  }, 2000)
+}
+</script>
+```
 
-## 四、功能点详细设计
-### 商品录入
-#### 1. Why - 业务背景
-- 业务目标：...
-- 用户价值：...
-...
+### 移动端（UniApp）
 
-### 订单拉取
-...
+```vue
+<template>
+  <view class="container">
+    <text class="title">📝 智能文档生成器</text>
+    
+    <!-- 语音输入 -->
+    <button @click="startVoiceInput">
+      🎤 语音输入
+    </button>
+    
+    <!-- 文本输入 -->
+    <textarea 
+      v-model="requirement" 
+      placeholder="你想创建什么文档？"
+    />
+    
+    <button type="primary" @click="generate">
+      ✨ 开始生成
+    </button>
+    
+    <!-- 进度显示 -->
+    <progress 
+      v-if="generating" 
+      :percent="progress" 
+    />
+  </view>
+</template>
+
+<script>
+export default {
+  data() {
+    return {
+      requirement: '',
+      generating: false,
+      progress: 0
+    }
+  },
+  methods: {
+    async generate() {
+      this.generating = true
+      
+      // 调用 API
+      const res = await uni.request({
+        url: 'http://localhost:8766/api/analyze',
+        method: 'POST',
+        data: { requirement: this.requirement }
+      })
+      
+      // 轮询进度
+      this.pollProgress(res.data.task_id)
+    },
+    
+    startVoiceInput() {
+      // 语音识别
+      uni.startRecord({
+        success: (res) => {
+          // 语音转文字（可集成讯飞/百度语音）
+          this.requirement = res.tempFilePath
+        }
+      })
+    }
+  }
+}
+</script>
 ```
 
 ---
@@ -277,7 +376,7 @@ cp .env.example .env
 
 ```bash
 # 运行测试
-pytest tests/ -v --cov=agent_skills_server
+pytest tests/ -v --cov=core
 
 # 运行单个测试
 pytest tests/test_analyzer.py -v
@@ -292,80 +391,53 @@ pytest tests/test_analyzer.py -v
 pip install -r requirements.txt
 
 # 代码格式化
-black agent_skills_server/
-isort agent_skills_server/
+black core/ skills/
 
 # 类型检查
-mypy agent_skills_server/
+mypy core/ skills/
 
 # 代码检查
-flake8 agent_skills_server/
+flake8 core/ skills/
 ```
 
 ---
 
-## 📋 API 端点总览
+## 📊 API 端点总览
 
 | 端点 | 方法 | 功能 |
 |------|------|------|
-| `/api/health` | GET | 健康检查 |
-| `/api/tasks/analyze` | POST | 🆕 智能分析并创建任务 |
+| `/api/analyze` | POST | 智能分析需求 |
 | `/api/tasks` | POST | 创建任务 |
-| `/api/tasks/{id}` | GET | 查询任务进度 |
-| `/api/tasks/{id}/results` | GET | 获取任务结果 |
-| `/api/tasks/{id}/retry` | POST | 重试失败任务 |
-| `/api/files/save` | POST | 保存文件 |
-| `/api/files/directories` | GET | 列出可用目录 |
+| `/api/tasks/{id}` | GET | 查询进度 |
+| `/api/tasks/{id}/result` | GET | 获取结果 |
+| `/api/documents` | GET | 文档列表 |
+| `/api/documents/{id}` | GET | 文档详情 |
+| `/api/documents/{id}/export` | POST | 导出文档 |
+| `/api/templates` | GET | 模板列表 |
+| `/api/health` | GET | 健康检查 |
 
 ---
 
-## 🎨 前端集成示例
+## 🚧 路线图
 
-```javascript
-// 提交需求
-async function submitRequirement(requirement) {
-  const response = await fetch('http://localhost:8766/api/tasks/analyze', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      requirement: requirement,
-      save_directory: '~/Documents/ERP 需求文档'
-    })
-  });
-  return await response.json();
-}
+### 已完成 ✅
+- [x] 需求分析引擎（通用化）
+- [x] 领域知识库框架
+- [x] 5W2H 文档模板
+- [x] 核心 API 服务
+- [x] Docker 部署支持
 
-// 轮询进度
-async function pollTaskProgress(taskId) {
-  while (true) {
-    const response = await fetch(`http://localhost:8766/api/tasks/${taskId}`);
-    const task = await response.json();
-    
-    if (task.status === 'completed' || task.status === 'partial') {
-      // 获取结果
-      const resultResponse = await fetch(`http://localhost:8766/api/tasks/${taskId}/results`);
-      return await resultResponse.json();
-    }
-    
-    // 更新进度条
-    updateProgressBar(task.completed_count, task.total_count);
-    
-    // 等待 5 秒后重试
-    await new Promise(resolve => setTimeout(resolve, 5000));
-  }
-}
-```
-
----
-
-## 🚧 后续计划
-
-- [ ] 前端交互界面
+### 进行中 🚧
+- [ ] Web 前端开发
+- [ ] 移动端开发
 - [ ] PDF/Word 导出
-- [ ] Jira/禅道集成
-- [ ] 版本管理
-- [ ] 实时预览
-- [ ] 多语言支持
+
+### 计划中 📋
+- [ ] 用户认证系统
+- [ ] 文档分享功能
+- [ ] 团队协作
+- [ ] 模板市场
+- [ ] API 开放平台
 
 ---
 
@@ -375,4 +447,4 @@ MIT License
 
 ---
 
-_让需求文档生成像聊天一样简单！_
+_让每一份需求文档都专业、完整、高效！_
