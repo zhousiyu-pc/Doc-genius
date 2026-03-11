@@ -51,6 +51,18 @@ class TestRequirementAnalyzer:
         result = self.analyzer._identify_domain(text)
         assert result == Domain.APP
 
+    def test_identify_domain_insurance(self):
+        """测试保险领域识别"""
+        text = "保险系统，管理保单、理赔和代理人"
+        result = self.analyzer._identify_domain(text)
+        assert result == Domain.INSURANCE
+
+    def test_identify_domain_education(self):
+        """测试教育领域识别"""
+        text = "教育培训平台，包含课程、学员和在线考试"
+        result = self.analyzer._identify_domain(text)
+        assert result == Domain.EDUCATION
+
     def test_identify_domain_general(self):
         """测试通用领域识别（无关键词）"""
         text = "我想做一个管理系统"
@@ -152,6 +164,26 @@ class TestRequirementAnalyzer:
         assert result.domain == Domain.ECOMMERCE
         assert result.domain_name == "电商平台"
         assert len(result.feature_list) > 10
+
+    def test_analyze_full_insurance(self):
+        """测试完整的保险需求分析"""
+        text = "保险系统，管理保单生命周期、理赔流程、代理人佣金，支持车险和寿险"
+        result = self.analyzer.analyze(text)
+        
+        assert result.domain == Domain.INSURANCE
+        assert result.domain_name == "保险系统"
+        assert len(result.feature_list) > 8
+        assert any("保单" in f for f in result.feature_list)
+
+    def test_analyze_full_education(self):
+        """测试完整的教育需求分析"""
+        text = "教育培训平台，学员管理、课程排课、在线学习和考试测评"
+        result = self.analyzer.analyze(text)
+        
+        assert result.domain == Domain.EDUCATION
+        assert result.domain_name == "教育培训系统"
+        assert len(result.feature_list) > 8
+        assert any("课程" in f or "学员" in f for f in result.feature_list)
 
     def test_to_context_dict(self):
         """测试上下文转换"""

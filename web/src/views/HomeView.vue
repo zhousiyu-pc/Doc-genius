@@ -156,8 +156,8 @@ const showProgress = ref(false)
 const examples = [
   'CRM 系统，管理客户和销售',
   '电商平台，支持多商家入驻',
-  'OA 办公系统，包含审批和考勤',
-  '数据看板，展示销售和库存',
+  '保险系统，包含保单和理赔管理',
+  '教育培训平台，在线课程和考试',
 ]
 
 const templates = [
@@ -167,6 +167,8 @@ const templates = [
   { id: 'oa', icon: '🏢', name: 'OA 办公', description: '办公自动化，审批、考勤、请假、报销' },
   { id: 'bi', icon: '📈', name: 'BI 分析', description: '数据分析看板，可视化报表、数据钻取' },
   { id: 'app', icon: '📱', name: '移动 App', description: 'iOS/Android应用，用户中心、核心功能' },
+  { id: 'insurance', icon: '🛡️', name: '保险系统', description: '保单、理赔、核保、精算、代理人' },
+  { id: 'education', icon: '🎓', name: '教育培训', description: '课程、学员、教师、排课、考试' },
 ]
 
 const recentDocuments = ref([

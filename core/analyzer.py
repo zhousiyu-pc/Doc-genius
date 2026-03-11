@@ -26,6 +26,8 @@ class Domain(str, Enum):
     OA = "oa"
     BI = "bi"
     APP = "app"
+    INSURANCE = "insurance"
+    EDUCATION = "education"
     GENERAL = "general"
 
 
@@ -148,6 +150,28 @@ DOMAIN_KNOWLEDGE = {
             "应用商店审核规范",
         ],
     ),
+    Domain.INSURANCE: DomainInfo(
+        name="保险系统",
+        modules=["保单管理", "理赔管理", "客户管理", "代理人管理", "精算定价", "续保管理"],
+        common_features=["保单生命周期管理", "理赔流程", "佣金计算", "风险评估", "核保规则"],
+        special_considerations=[
+            "保险监管合规（银保监会）",
+            "精算数据准确性",
+            "保单条款法律效力",
+            "客户隐私保护",
+        ],
+    ),
+    Domain.EDUCATION: DomainInfo(
+        name="教育培训系统",
+        modules=["课程管理", "学员管理", "教师管理", "排课系统", "在线学习", "考试测评"],
+        common_features=["课程表管理", "学习进度跟踪", "在线作业", "考试成绩", "证书管理"],
+        special_considerations=[
+            "教学质量管理",
+            "学员数据安全",
+            "在线直播稳定性",
+            "教育合规性",
+        ],
+    ),
 }
 
 # 领域识别关键词
@@ -158,6 +182,8 @@ DOMAIN_KEYWORDS = {
     Domain.OA: ["oa", "办公", "审批", "考勤", "请假", "报销", "行政", "后勤"],
     Domain.BI: ["bi", "数据看板", "报表", "分析", "可视化", "图表", " dashboard"],
     Domain.APP: ["app", "移动应用", "ios", "android", "小程序", "手机"],
+    Domain.INSURANCE: ["保险", "保单", "理赔", "核保", "精算", "代理人", "续保", "承保"],
+    Domain.EDUCATION: ["教育", "培训", "课程", "学员", "教师", "排课", "在线学习", "考试"],
 }
 
 # 业务模式识别关键词
@@ -459,6 +485,34 @@ class RequirementAnalyzer:
                     "field": "platform",
                     "question": "目标平台？",
                     "options": ["iOS", "Android", "双平台", "小程序"],
+                })
+        
+        elif domain == Domain.INSURANCE:
+            if "险种" not in text_lower and "保险类型" not in text_lower:
+                questions.append({
+                    "field": "insurance_type",
+                    "question": "主要险种类型？",
+                    "options": ["人寿保险", "财产保险", "健康保险", "车险", "综合险"],
+                })
+            if "渠道" not in text_lower and "销售" not in text_lower:
+                questions.append({
+                    "field": "sales_channel",
+                    "question": "销售渠道？",
+                    "options": ["代理人渠道", "银保渠道", "互联网直销", "混合渠道"],
+                })
+        
+        elif domain == Domain.EDUCATION:
+            if "线上" not in text_lower and "线下" not in text_lower:
+                questions.append({
+                    "field": "teaching_mode",
+                    "question": "教学模式？",
+                    "options": ["线上直播", "线下面授", "混合式教学", "录播课程"],
+                })
+            if "学员" in text_lower and "年龄段" not in text_lower:
+                questions.append({
+                    "field": "student_age",
+                    "question": "学员年龄段？",
+                    "options": ["K12（中小学）", "大学生", "成人职业", "全年龄段"],
                 })
         
         return questions
