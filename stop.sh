@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-#  Agent Skills Server — 停止脚本
+#  Doc-genius — 停止脚本
 #  用法：./stop.sh
 # ============================================================
 
@@ -12,7 +12,7 @@ PORT="${SKILLS_PORT:-8766}"
 
 stop_by_pid() {
     local PID=$1
-    echo "正在停止 Agent Skills Server (PID: $PID) ..."
+    echo "正在停止 Doc-genius 服务 (PID: $PID) ..."
     kill "$PID" 2>/dev/null
 
     for i in $(seq 1 10); do
@@ -58,6 +58,6 @@ cleanup_port
 
 echo ""
 echo "=========================================="
-echo "  Agent Skills Server 已停止"
+echo "  Doc-genius 服务已停止"
 echo "=========================================="
 echo ""

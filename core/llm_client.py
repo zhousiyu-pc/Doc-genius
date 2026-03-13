@@ -2,7 +2,7 @@
 LLM 客户端 — 通义千问 Qwen
 ========================
 直接调用通义千问 API 生成功能点详设文档，
-不再依赖 Dify 中间层，减少部署步骤。
+支持普通调用和 SSE 流式调用两种模式。
 """
 
 import json
@@ -12,6 +12,7 @@ import logging
 import threading
 import urllib.request
 import urllib.error
+from typing import Generator
 
 from .config import LLM_API_KEY, LLM_MODEL
 
@@ -186,3 +187,113 @@ def call_completion(
                 raise
 
     raise last_error
+
+
+def _rate_limit_wait() -> None:
+    """全局速率控制：确保两次 API 调用之间至少间隔 _MIN_INTERVAL 秒。"""
+    global _last_call_time
+    with _api_lock:
+        now = time.time()
+        elapsed = now - _last_call_time
+        if elapsed < _MIN_INTERVAL:
+            wait_for = _MIN_INTERVAL - elapsed
+            logger.debug("速率控制：等待 %.1f 秒", wait_for)
+            time.sleep(wait_for)
+        _last_call_time = time.time()
+
+
+def call_chat(
+    messages: list[dict],
+    temperature: float = 0.4,
+    model: str | None = None,
+) -> str:
+    """
+    通用多轮对话调用（非流式），返回完整的 LLM 回复文本。
+
+    Args:
+        messages: OpenAI 格式的 messages 数组，如
+                  [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}]
+        temperature: 采样温度
+        model: 可选覆盖模型名称，默认使用全局 LLM_MODEL
+    """
+    use_model = model or LLM_MODEL
+    payload = {
+        "model": use_model,
+        "messages": messages,
+        "temperature": temperature,
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    _rate_limit_wait()
+
+    req = urllib.request.Request(
+        LLM_API_URL,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {LLM_API_KEY}",
+        },
+        method="POST",
+    )
+    logger.info("call_chat: model=%s, messages=%d条", use_model, len(messages))
+    resp = urllib.request.urlopen(req, timeout=180, context=_ssl_ctx)
+    result = json.loads(resp.read().decode("utf-8"))
+    return result["choices"][0]["message"]["content"]
+
+
+def call_chat_stream(
+    messages: list[dict],
+    temperature: float = 0.4,
+    model: str | None = None,
+) -> Generator[str, None, None]:
+    """
+    流式多轮对话调用，返回逐 chunk 产出文本的生成器。
+
+    通义千问 OpenAI 兼容接口支持 stream=true，返回 SSE 格式数据。
+    每个 yield 产出一小段文本内容（delta），调用方可逐段拼接或推送给前端。
+
+    Args:
+        messages: OpenAI 格式的 messages 数组
+        temperature: 采样温度
+        model: 可选覆盖模型名称
+    Yields:
+        str: 每次产出的文本片段
+    """
+    use_model = model or LLM_MODEL
+    payload = {
+        "model": use_model,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": True,
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    _rate_limit_wait()
+
+    req = urllib.request.Request(
+        LLM_API_URL,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {LLM_API_KEY}",
+        },
+        method="POST",
+    )
+    logger.info("call_chat_stream: model=%s, messages=%d条", use_model, len(messages))
+
+    resp = urllib.request.urlopen(req, timeout=300, context=_ssl_ctx)
+
+    for raw_line in resp:
+        line = raw_line.decode("utf-8").strip()
+        if not line:
+            continue
+        if line.startswith("data: "):
+            payload_str = line[6:]
+            if payload_str == "[DONE]":
+                break
+            try:
+                chunk = json.loads(payload_str)
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                content = delta.get("content", "")
+                if content:
+                    yield content
+            except (json.JSONDecodeError, IndexError, KeyError):
+                logger.debug("忽略无法解析的流式 chunk: %s", line)

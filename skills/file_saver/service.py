@@ -10,7 +10,7 @@ import datetime
 import logging
 from pathlib import Path
 
-from ...core.config import DEFAULT_SAVE_DIR
+from core.config import DEFAULT_SAVE_DIR
 
 logger = logging.getLogger("agent_skills.file_saver")
 

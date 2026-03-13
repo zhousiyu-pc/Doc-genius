@@ -9,7 +9,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from ...core.config import DEFAULT_SAVE_DIR
+from core.config import DEFAULT_SAVE_DIR
 from .service import save_file
 
 logger = logging.getLogger("agent_skills.file_saver")

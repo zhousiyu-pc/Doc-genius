@@ -3,8 +3,8 @@
     <div class="home-content">
       <!-- 标题区域 -->
       <div class="header">
-        <h1 class="title">📝 智能文档生成器</h1>
-        <p class="subtitle">让文档生成像聊天一样简单</p>
+        <h1 class="title">📝 AI 需求与详设生成器</h1>
+        <p class="subtitle">一键生成结构化的需求文档与详细设计文档</p>
       </div>
 
       <!-- 输入区域 -->
@@ -26,7 +26,7 @@
             <el-button type="primary" size="large" :loading="generating" @click="handleSubmit">
               ✨ 开始生成
             </el-button>
-            <el-button @click="handleVoiceInput">
+            <el-button size="large" @click="handleVoiceInput">
               🎤 语音输入
             </el-button>
           </div>
@@ -87,6 +87,45 @@
         </el-card>
       </div>
 
+      <!-- 需求大纲预览弹窗 -->
+      <el-dialog
+        v-model="showOutline"
+        title="需求大纲预览"
+        width="720px"
+      >
+        <div v-if="analysis">
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="领域">{{ analysis.domain_name }}</el-descriptions-item>
+            <el-descriptions-item label="复杂度">{{ analysis.complexity }}</el-descriptions-item>
+            <el-descriptions-item label="核心模块" :span="2">
+              <el-tag
+                v-for="m in analysis.core_modules"
+                :key="m"
+                class="mr-6"
+                effect="plain"
+              >
+                {{ m }}
+              </el-tag>
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <el-divider>功能点列表（大纲）</el-divider>
+          <el-table
+            :data="analysis.feature_list.map((f, idx) => ({ index: idx + 1, name: f }))"
+            size="small"
+            height="260"
+          >
+            <el-table-column prop="index" label="#" width="60" />
+            <el-table-column prop="name" label="功能点" />
+          </el-table>
+        </div>
+
+        <template #footer>
+          <el-button @click="showOutline = false">返回修改</el-button>
+          <el-button type="primary" @click="confirmGenerate">生成详细文档</el-button>
+        </template>
+      </el-dialog>
+
       <!-- 生成进度弹窗 -->
       <el-dialog
         v-model="showProgress"
@@ -132,7 +171,13 @@
         </div>
 
         <template #footer>
-          <el-button @click="cancelGeneration">取消生成</el-button>
+          <el-button @click="hideProgress">收起并后台运行</el-button>
+          <el-button type="danger" @click="cancelGeneration" v-if="currentTask">
+            取消生成
+          </el-button>
+          <el-button type="primary" @click="viewDocument(currentTask.task_id)" v-if="currentTask">
+            查看详情
+          </el-button>
         </template>
       </el-dialog>
     </div>
@@ -142,6 +187,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useTaskStore } from '@/stores/task'
 
 const router = useRouter()
@@ -151,7 +197,9 @@ const requirement = ref('')
 const generating = computed(() => taskStore.generating)
 const progress = computed(() => taskStore.progress)
 const currentTask = computed(() => taskStore.currentTask)
+const analysis = computed(() => taskStore.analysis)
 const showProgress = ref(false)
+const showOutline = ref(false)
 
 const examples = [
   'CRM 系统，管理客户和销售',
@@ -181,9 +229,38 @@ const handleSubmit = async () => {
     return
   }
 
+  // 第一步：仅生成需求大纲
+  const result = await taskStore.analyze(requirement.value)
+  if (result.success) {
+    showOutline.value = true
+  } else if (result.message) {
+    ElMessage.error(result.message)
+  }
+}
+
+const confirmGenerate = async () => {
+  if (!requirement.value.trim()) return
+
+  try {
+    await ElMessageBox.confirm(
+      '将基于当前需求大纲，为每个功能点生成详细的需求与设计文档。是否继续？',
+      '确认生成详细文档',
+      {
+        type: 'warning',
+        confirmButtonText: '开始生成',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+
   const result = await taskStore.createTask(requirement.value)
   if (result.success) {
+    showOutline.value = false
     showProgress.value = true
+  } else if (result.message) {
+    ElMessage.error(result.message)
   }
 }
 
@@ -209,159 +286,222 @@ const downloadDocument = (id: string) => {
   alert('下载功能开发中...')
 }
 
-const cancelGeneration = () => {
-  taskStore.reset()
+const hideProgress = () => {
+  // 不再重置 store，仅隐藏弹窗
   showProgress.value = false
+  ElMessage.success('已转入后台运行，可在右下角进度条或“我的文档”中查看')
+}
+
+const cancelGeneration = async () => {
+  if (!currentTask.value) return
+  try {
+    await ElMessageBox.confirm(
+      '取消后，系统将不再继续为该任务生成后续文档。已生成的部分会保留。',
+      '确认取消生成',
+      {
+        type: 'warning',
+        confirmButtonText: '确认取消',
+        cancelButtonText: '继续生成',
+      },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await axios.post(`/api/tasks/${currentTask.value.task_id}/cancel`)
+    taskStore.reset()
+    showProgress.value = false
+    ElMessage.success('已取消生成')
+  } catch (e) {
+    console.error('取消任务失败:', e)
+    ElMessage.error('取消失败，请稍后重试')
+  }
 }
 </script>
 
 <style scoped lang="scss">
 .home-container {
   min-height: 100vh;
-  padding: 40px 20px;
+  padding: 60px 20px;
+  background-color: transparent;
 }
 
 .home-content {
-  max-width: 1200px;
+  max-width: 800px;
   margin: 0 auto;
 }
 
 .header {
   text-align: center;
-  margin-bottom: 40px;
+  margin-bottom: 48px;
 
   .title {
-    font-size: 48px;
-    color: white;
-    margin-bottom: 10px;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+    font-size: 40px;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 12px;
+    letter-spacing: -0.02em;
   }
 
   .subtitle {
-    font-size: 20px;
-    color: rgba(255, 255, 255, 0.9);
+    font-size: 18px;
+    color: #64748b;
+    font-weight: 400;
   }
 }
 
 .input-section {
-  margin-bottom: 40px;
+  margin-bottom: 48px;
 
   .input-card {
-    backdrop-filter: blur(10px);
-    background: rgba(255, 255, 255, 0.95);
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 10px;
   }
 
   .card-title {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 600;
+    color: #1e293b;
   }
 
   .input-actions {
     margin-top: 20px;
     display: flex;
-    gap: 10px;
+    justify-content: flex-end;
+    gap: 12px;
   }
 
   .quick-examples {
-    margin-top: 20px;
+    margin-top: 24px;
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 8px;
 
     .examples-label {
-      font-size: 14px;
-      color: #666;
+      font-size: 13px;
+      color: #94a3b8;
+      margin-right: 4px;
     }
 
     .example-tag {
       cursor: pointer;
-      transition: all 0.3s;
+      background-color: #f1f5f9;
+      border: none;
+      color: #475569;
+      border-radius: 6px;
+      padding: 0 12px;
+      height: 28px;
+      line-height: 28px;
+      transition: all 0.2s ease;
 
       &:hover {
-        transform: translateY(-2px);
+        background-color: #e2e8f0;
+        color: #0f172a;
+        transform: translateY(-1px);
       }
     }
   }
 }
 
 .templates-section {
-  margin-bottom: 40px;
+  margin-bottom: 48px;
 
   .section-title {
-    font-size: 24px;
-    color: white;
+    font-size: 18px;
+    font-weight: 600;
+    color: #334155;
     margin-bottom: 20px;
-    text-align: center;
+    text-align: left;
   }
 
   .templates-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 20px;
+    gap: 16px;
   }
 
   .template-card {
     cursor: pointer;
-    transition: all 0.3s;
-    text-align: center;
-    padding: 20px 10px;
+    transition: all 0.2s ease;
+    text-align: left;
+    padding: 20px 16px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0 !important;
+    box-shadow: none !important;
 
     &:hover {
-      transform: translateY(-5px);
+      transform: translateY(-4px);
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025) !important;
+      border-color: #cbd5e1 !important;
     }
 
     .template-icon {
-      font-size: 48px;
-      margin-bottom: 10px;
+      font-size: 32px;
+      margin-bottom: 16px;
     }
 
     .template-name {
-      font-size: 18px;
+      font-size: 16px;
       font-weight: 600;
-      margin-bottom: 5px;
+      color: #0f172a;
+      margin-bottom: 6px;
     }
 
     .template-desc {
       font-size: 13px;
-      color: #666;
+      color: #64748b;
+      line-height: 1.5;
     }
   }
 }
 
 .recent-section {
   .section-title {
-    font-size: 24px;
-    color: white;
+    font-size: 18px;
+    font-weight: 600;
+    color: #334155;
     margin-bottom: 20px;
-    text-align: center;
+    text-align: left;
   }
 
   .document-card {
-    margin-bottom: 15px;
+    margin-bottom: 12px;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    background: #ffffff;
+    border: 1px solid #e2e8f0 !important;
+    box-shadow: none !important;
+    transition: all 0.2s;
+
+    &:hover {
+      border-color: #cbd5e1 !important;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05) !important;
+    }
 
     .document-info {
       display: flex;
       align-items: center;
-      gap: 15px;
+      gap: 16px;
 
       .document-icon {
-        font-size: 32px;
+        font-size: 24px;
       }
 
       .document-details {
         .document-title {
-          font-size: 16px;
-          font-weight: 600;
-          margin-bottom: 5px;
+          font-size: 15px;
+          font-weight: 500;
+          color: #0f172a;
+          margin-bottom: 4px;
         }
 
         .document-meta {
           font-size: 13px;
-          color: #666;
+          color: #64748b;
           display: flex;
           gap: 8px;
         }
@@ -370,7 +510,7 @@ const cancelGeneration = () => {
 
     .document-actions {
       display: flex;
-      gap: 10px;
+      gap: 8px;
     }
   }
 }
@@ -388,7 +528,8 @@ const cancelGeneration = () => {
   .feature-status {
     h4 {
       margin-bottom: 10px;
-      color: #67c23a;
+      color: #10b981;
+      font-weight: 600;
     }
 
     .feature-list {
@@ -397,15 +538,20 @@ const cancelGeneration = () => {
       overflow-y: auto;
 
       .feature-item {
-        padding: 5px 0;
+        padding: 6px 0;
         font-size: 14px;
-        color: #666;
+        color: #475569;
+        border-bottom: 1px solid #f1f5f9;
+        
+        &:last-child {
+          border-bottom: none;
+        }
       }
     }
   }
 
   .progress-tips {
-    margin-top: 20px;
+    margin-top: 24px;
   }
 }
 </style>

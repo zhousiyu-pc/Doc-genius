@@ -72,13 +72,42 @@ def init_db():
 
         CREATE INDEX IF NOT EXISTS idx_sub_tasks_task_id ON sub_tasks(task_id);
         CREATE INDEX IF NOT EXISTS idx_sub_tasks_status ON sub_tasks(status);
+
+        -- 对话会话表：存储 LLM 多轮对话的会话状态
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            id TEXT PRIMARY KEY,
+            title TEXT DEFAULT '',
+            status TEXT DEFAULT 'active',
+            outline TEXT DEFAULT '',
+            task_id TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        -- 对话消息表：存储每轮对话的消息内容
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            msg_type TEXT DEFAULT 'text',
+            metadata TEXT DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES chat_sessions(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_session
+            ON chat_messages(session_id);
     """)
 
     # 兼容旧库：给 tasks 表添加 result_file 列（如已存在则忽略）
-    try:
-        conn.execute("ALTER TABLE tasks ADD COLUMN result_file TEXT")
-    except sqlite3.OperationalError:
-        pass
+    for alter_sql in [
+        "ALTER TABLE tasks ADD COLUMN result_file TEXT",
+    ]:
+        try:
+            conn.execute(alter_sql)
+        except sqlite3.OperationalError:
+            pass
 
     conn.commit()
     conn.close()

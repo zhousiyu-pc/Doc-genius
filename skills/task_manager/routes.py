@@ -10,16 +10,10 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from ...core.config import LLM_API_KEY
-from ...core.db import get_db
-from ...core.analyzer import analyze_requirement
-from .service import (
-    submit_task,
-    submit_task_with_analysis,
-    retry_failed_task,
-    resume_task,
-    sync_task_counts,
-)
+from core.config import LLM_API_KEY
+from core.db import get_db
+from core.analyzer import analyze_requirement
+from skills.task_manager import service as task_service
 
 logger = logging.getLogger("agent_skills.task_manager")
 
@@ -72,29 +66,67 @@ async def api_analyze_requirement(request: Request) -> JSONResponse:
             {"success": False, "message": "requirement 不能为空"},
             status_code=400,
         )
-    if not LLM_API_KEY:
+    # 预览模式仅做需求分析，不真正调用 LLM 生成详细文档
+    preview_only = bool(body.get("preview_only"))
+    if not preview_only and not LLM_API_KEY:
         return JSONResponse(
             {"success": False, "message": "LLM_API_KEY 未配置，请设置环境变量"},
             status_code=500,
         )
 
     try:
-        # 调用智能分析接口
-        result = submit_task_with_analysis(
+        logger.info("收到需求分析请求: requirement=%s", requirement)
+
+        # 1) 仅预览：返回分析结果和功能大纲，不创建任务
+        if preview_only:
+            from core.analyzer import RequirementAnalyzer
+
+            analyzer = RequirementAnalyzer()
+            analyzed = analyzer.analyze(requirement)
+            ctx = analyzer.to_context_dict(analyzed)
+
+            return JSONResponse(
+                {
+                    "success": True,
+                    "preview_only": True,
+                    "domain": analyzed.domain.value,
+                    "domain_name": analyzed.domain_name,
+                    "feature_count": analyzed.estimated_features,
+                    "complexity": analyzed.complexity.value,
+                    "core_modules": analyzed.core_modules,
+                    "feature_list": analyzed.feature_list,
+                    "questions": analyzed.questions,
+                    "context": ctx,
+                    "message": "已生成需求大纲，请确认后再生成详细文档",
+                }
+            )
+
+        # 2) 正式生成：分析 + 创建任务
+        result = task_service.submit_task_with_analysis(
             raw_requirement=requirement,
             save_directory=body.get("save_directory", ""),
             detail_level=body.get("options", {}).get("detail_level", "标准"),
         )
         
-        # 添加领域信息到响应
-        result["domain"] = body.get("domain", "")
+        # 添加领域信息到响应（如前端有额外传入，可透传）
+        result["domain"] = body.get("domain", "") or result.get("domain", "")
         
         return JSONResponse(result)
     
     except Exception as e:
-        logger.exception("需求分析失败")
+        logger.exception("需求分析失败: %s", str(e))
+        # 对常见错误给出更友好的提示
+        err_msg = str(e)
+        if "LLM_API_KEY" in err_msg or "api_key" in err_msg.lower():
+            user_msg = "LLM API Key 未配置或无效，请设置环境变量 LLM_API_KEY"
+        elif "connection" in err_msg.lower() or "timeout" in err_msg.lower():
+            user_msg = "无法连接 LLM 服务，请检查网络或稍后重试"
+        elif "permission" in err_msg.lower() or "Permission" in err_msg:
+            user_msg = "数据库或文件权限不足，请检查数据目录可写性"
+        else:
+            user_msg = f"分析失败：{err_msg}"
         return JSONResponse(
-            {"success": False, "message": f"分析失败：{str(e)}"},
+            {"success": False, "message": user_msg},
             status_code=500,
         )
 
@@ -134,7 +166,7 @@ async def api_submit_task(request: Request) -> JSONResponse:
             status_code=500,
         )
 
-    task_id = submit_task(
+    task_id = task_service.submit_task(
         feature_list=feature_list,
         context=context,
         business_model=body.get("business_model", ""),
@@ -155,47 +187,53 @@ async def api_submit_task(request: Request) -> JSONResponse:
 async def api_task_status(request: Request) -> JSONResponse:
     """GET /api/tasks/{task_id} — 查询任务状态"""
     task_id = request.path_params["task_id"]
-
-    with get_db() as conn:
-        task = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
-        if not task:
-            return JSONResponse({"success": False, "message": "任务不存在"}, status_code=404)
-
-        sub_tasks = conn.execute(
-            "SELECT id, feature_name, seq_index, status, retry_count, error_message, started_at, finished_at "
-            "FROM sub_tasks WHERE task_id = ? ORDER BY seq_index",
-            (task_id,),
-        ).fetchall()
-
-    result_file = ""
     try:
-        result_file = task["result_file"] or ""
-    except (IndexError, KeyError):
-        pass
+        with get_db() as conn:
+            task = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            if not task:
+                return JSONResponse({"success": False, "message": "任务不存在"}, status_code=404)
 
-    return JSONResponse({
-        "success": True,
-        "task_id": task_id,
-        "status": task["status"],
-        "total_count": task["total_count"],
-        "completed_count": task["completed_count"],
-        "failed_count": task["failed_count"],
-        "pending_count": max(0, task["total_count"] - task["completed_count"] - task["failed_count"]),
-        "result_file": result_file,
-        "created_at": task["created_at"],
-        "finished_at": task["finished_at"],
-        "sub_tasks": [
-            {
-                "id": s["id"],
-                "feature_name": s["feature_name"],
-                "index": s["seq_index"],
-                "status": s["status"],
-                "retry_count": s["retry_count"],
-                "error": s["error_message"],
-            }
-            for s in sub_tasks
-        ],
-    })
+            sub_tasks = conn.execute(
+                "SELECT id, feature_name, seq_index, status, retry_count, error_message, started_at, finished_at "
+                "FROM sub_tasks WHERE task_id = ? ORDER BY seq_index",
+                (task_id,),
+            ).fetchall()
+
+        result_file = ""
+        try:
+            result_file = task["result_file"] or ""
+        except (IndexError, KeyError):
+            pass
+
+        return JSONResponse({
+            "success": True,
+            "task_id": task_id,
+            "status": task["status"],
+            "total_count": task["total_count"],
+            "completed_count": task["completed_count"],
+            "failed_count": task["failed_count"],
+            "pending_count": max(0, task["total_count"] - task["completed_count"] - task["failed_count"]),
+            "result_file": result_file,
+            "created_at": task["created_at"],
+            "finished_at": task["finished_at"],
+            "sub_tasks": [
+                {
+                    "id": s["id"],
+                    "feature_name": s["feature_name"],
+                    "index": s["seq_index"],
+                    "status": s["status"],
+                    "retry_count": s["retry_count"],
+                    "error": s["error_message"],
+                }
+                for s in sub_tasks
+            ],
+        })
+    except Exception as e:
+        logger.exception("查询任务状态失败: task_id=%s", task_id)
+        return JSONResponse(
+            {"success": False, "message": f"查询失败：{str(e)}"},
+            status_code=500,
+        )
 
 
 def _build_results_response(task_id: str) -> dict | None:
@@ -252,7 +290,7 @@ async def api_task_results(request: Request) -> JSONResponse:
 async def api_retry_failed(request: Request) -> JSONResponse:
     """POST /api/tasks/{task_id}/retry — 重试失败的子任务"""
     task_id = request.path_params["task_id"]
-    result = retry_failed_task(task_id)
+    result = task_service.retry_failed_task(task_id)
     status_code = 200 if result["success"] else 404
     return JSONResponse(result, status_code=status_code)
 
@@ -260,7 +298,15 @@ async def api_retry_failed(request: Request) -> JSONResponse:
 async def api_resume_task(request: Request) -> JSONResponse:
     """POST /api/tasks/{task_id}/resume — 恢复执行未完成的任务"""
     task_id = request.path_params["task_id"]
-    result = resume_task(task_id)
+    result = task_service.resume_task(task_id)
+    status_code = 200 if result["success"] else 404
+    return JSONResponse(result, status_code=status_code)
+
+
+async def api_cancel_task(request: Request) -> JSONResponse:
+    """POST /api/tasks/{task_id}/cancel — 取消任务生成"""
+    task_id = request.path_params["task_id"]
+    result = task_service.cancel_task(task_id)
     status_code = 200 if result["success"] else 404
     return JSONResponse(result, status_code=status_code)
 
@@ -275,4 +321,5 @@ routes = [
     Route("/api/tasks/{task_id}/result", api_task_results, methods=["GET"]),
     Route("/api/tasks/{task_id}/retry", api_retry_failed, methods=["POST"]),
     Route("/api/tasks/{task_id}/resume", api_resume_task, methods=["POST"]),
+    Route("/api/tasks/{task_id}/cancel", api_cancel_task, methods=["POST"]),
 ]

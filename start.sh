@@ -6,7 +6,7 @@
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_DIR="$SCRIPT_DIR"
 PID_FILE="$SCRIPT_DIR/.server.pid"
 LOG_FILE="$SCRIPT_DIR/.server.log"
 
@@ -67,7 +67,7 @@ fi
 
 # ── 启动服务 ────────────────────────────────────
 
-echo "启动 Agent Skills Server ..."
+echo "启动 Doc-genius 服务 ..."
 
 cd "$PROJECT_DIR"
 nohup python3 "$SCRIPT_DIR/main.py" > "$LOG_FILE" 2>&1 &

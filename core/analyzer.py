@@ -172,6 +172,16 @@ DOMAIN_KNOWLEDGE = {
             "教育合规性",
         ],
     ),
+    Domain.GENERAL: DomainInfo(
+        name="通用系统",
+        modules=["用户管理", "核心功能", "数据管理", "消息通知", "系统设置"],
+        common_features=["用户权限管理", "数据导入导出", "操作日志", "消息通知", "系统配置"],
+        special_considerations=[
+            "用户数据安全",
+            "系统稳定性",
+            "可扩展性设计",
+        ],
+    ),
 }
 
 # 领域识别关键词
@@ -228,6 +238,41 @@ class RequirementAnalyzer:
         # 5. 功能点拆解
         feature_list = self._generate_features(raw_input, domain, core_modules)
         
+        # 针对“保险公司智能培训/陪练”场景的定制优化：
+        # 如果领域被识别为教育培训，但需求中同时包含明显的保险行业用语，
+        # 则保留教育领域不变，仅调整模块和功能点的语义，更贴近“保险公司培训/陪练”。
+        text_lower = raw_input.lower()
+        if (
+            domain == Domain.EDUCATION
+            and any(kw in text_lower for kw in ["保险公司", "保险销售", "保险代理", "保险顾问", "代理人"])
+        ):
+            logger.info("检测到保险公司培训场景，应用教育领域下的保险培训模板")
+            core_modules = [
+                "培训项目与课程管理",
+                "学员（员工/代理人）管理",
+                "智能陪练与实战演练",
+                "考试测评与认证",
+                "培训效果分析与合规追踪",
+            ]
+            # 覆盖功能点列表为更贴合保险公司培训的语义
+            feature_list = [
+                "培训项目与课程管理 - 培训项目规划与招募",
+                "培训项目与课程管理 - 课程大纲与教学计划",
+                "培训项目与课程管理 - 线上/线下混合授课管理",
+                "学员（员工/代理人）管理 - 学员档案与职级管理",
+                "学员（员工/代理人）管理 - 学习进度与出勤记录",
+                "学员（员工/代理人）管理 - 销售能力画像与标签",
+                "智能陪练与实战演练 - 标准话术库与情景脚本",
+                "智能陪练与实战演练 - 通话/面谈模拟与评分",
+                "智能陪练与实战演练 - 销售流程陪练（邀约-面谈-成单）",
+                "考试测评与认证 - 题库管理与组卷策略",
+                "考试测评与认证 - 理论考试与实战考核",
+                "考试测评与认证 - 证书发放与有效期管理",
+                "培训效果分析与合规追踪 - 班级/项目效果对比分析",
+                "培训效果分析与合规追踪 - 与业绩数据联动分析",
+                "培训效果分析与合规追踪 - 合规培训完成率与留痕",
+            ]
+        
         # 6. 复杂度评估
         complexity = self._evaluate_complexity(feature_list, raw_input)
         
@@ -262,8 +307,17 @@ class RequirementAnalyzer:
         for domain, keywords in DOMAIN_KEYWORDS.items():
             scores[domain] = sum(1 for kw in keywords if kw in text_lower)
         
-        # 返回得分最高的领域
-        if max(scores.values()) > 0:
+        # 特殊处理：既出现“保险”又出现“培训/课程/学习”等词时，
+        # 更符合“保险公司的培训系统/智能陪练”这类场景，优先视为教育培训领域。
+        if (
+            scores.get(Domain.INSURANCE, 0) > 0
+            and scores.get(Domain.EDUCATION, 0) > 0
+            and any(kw in text_lower for kw in ["培训", "学习", "课程", "考试", "练习", "陪练"])
+        ):
+            return Domain.EDUCATION
+        
+        # 返回得分最高的领域（如有命中）
+        if scores and max(scores.values()) > 0:
             return max(scores, key=scores.get)
         
         return Domain.GENERAL

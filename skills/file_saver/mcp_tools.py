@@ -4,7 +4,7 @@
 
 import os
 
-from ...core.config import DEFAULT_SAVE_DIR
+from core.config import DEFAULT_SAVE_DIR
 from .service import save_file
 
 

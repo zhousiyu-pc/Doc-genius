@@ -15,15 +15,15 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from ...core.config import (
+from core.config import (
     TASK_WORKERS, MAX_RETRIES, RETRY_INTERVALS,
     LLM_API_KEY, DB_PATH,
 )
-from ...core.db import get_db
-from ...core.llm_client import call_completion
-from ...core.logger import get_task_logger
-from ...core.analyzer import RequirementAnalyzer, analyze_requirement
-from ..file_saver.service import save_file
+from core.db import get_db
+from core.llm_client import call_completion
+from core.logger import get_task_logger
+from core.analyzer import RequirementAnalyzer, analyze_requirement
+from skills.file_saver.service import save_file
 
 logger = logging.getLogger("agent_skills.task_manager")
 
@@ -645,6 +645,33 @@ def submit_task(
 
 # ── 任务管理接口 ──────────────────────────────────────
 
+def cancel_task(task_id: str) -> dict:
+    """取消任务：将任务及未开始的子任务标记为 cancelled。
+    已在执行中的子任务会在下次心跳检查时尽量停止（如果实现了相应逻辑）。"""
+    with get_db() as conn:
+        task = conn.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if not task:
+            return {"success": False, "message": "任务不存在"}
+
+        if task["status"] in ("completed", "failed", "cancelled"):
+            return {"success": False, "message": f"当前状态为 {task['status']}，无法取消"}
+
+        now = datetime.datetime.now().isoformat()
+        conn.execute(
+            "UPDATE tasks SET status = 'cancelled', updated_at = ?, finished_at = ? WHERE id = ?",
+            (now, now, task_id),
+        )
+        # 将尚未开始的子任务标记为取消
+        conn.execute(
+            "UPDATE sub_tasks SET status = 'cancelled', finished_at = ? "
+            "WHERE task_id = ? AND status IN ('pending', 'running')",
+            (now, task_id),
+        )
+
+    get_task_logger(task_id).info("任务已被取消")
+    return {"success": True, "message": "任务已取消"}
+
+
 def retry_failed_task(task_id: str) -> dict:
     """重试指定任务中所有失败的子任务"""
     task_log = get_task_logger(task_id)
@@ -743,6 +770,18 @@ def resume_task(task_id: str) -> dict:
         "resumed_count": resumed_count,
         "message": f"已重新提交 {resumed_count} 个未完成的子任务",
     }
+
+
+def sync_task_counts(task_id: str = "") -> None:
+    """
+    兼容函数：同步任务计数（历史版本的路由层可能会尝试导入此函数）。
+
+    当前实现中，任务计数在子任务执行过程中已实时更新，因此此函数默认无需执行任何操作。
+    保留该函数的目的，是避免因代码版本不一致导致的 ImportError，从而影响服务启动。
+
+    :param task_id: 可选任务 ID；为空表示不限定任务
+    """
+    return None
 
 
 def recover_tasks():
