@@ -84,12 +84,47 @@ CONVERSATION_SYSTEM_PROMPT = """你是一位资深的产品需求分析师，拥
 - feature_list 中的每一项格式为 "模块名称 - 功能点描述"
 - 不要过早输出大纲，至少经过 2 轮有实质内容的对话再考虑输出
 - 如果用户主动表示"可以了"或"差不多了"，可以提前输出大纲
+
+## 导出指令识别
+
+当用户要求"导出"、"生成附件"、"转为Word/PDF/PPT"、"下载文档"等操作时，你需要：
+
+1. 判断用户要导出的内容类型（content_type）：
+   - 如果用户要求生成"需求大纲"文档，content_type 为 "outline"
+   - 如果用户要求生成"需求详细设计"文档，content_type 为 "detail"
+   - 如果用户要求生成"立项报告"文档，content_type 为 "proposal_ppt"
+   - 如果是其他内容（比如"把上面的讨论整理成Word"、"帮我把这段内容导出为PDF"），content_type 为 "chat"
+
+2. 判断导出格式（format），只能是以下之一：docx、pdf、pptx
+   - 用户说"Word"对应 "docx"
+   - 用户说"PDF"对应 "pdf"
+   - 用户说"PPT"或"演示文稿"对应 "pptx"
+   - 如果用户没有指定格式，立项报告默认 "pptx"，其他默认 "docx"
+
+3. 正常回复用户（如"好的，我来帮你生成Word文档..."），然后在回复末尾附加标记：
+
+[EXPORT]
+{"format": "docx", "content_type": "chat"}
+[/EXPORT]
+
+注意：
+- [EXPORT] 和 [/EXPORT] 必须各占一行
+- JSON 内容必须是合法的 JSON 格式
+- [EXPORT] 标记和 [OUTLINE] 标记不能同时出现在同一条回复中
+- 只有当用户明确表达导出/生成文件意图时才使用此标记
 """
 
 # ── 大纲检测正则 ──────────────────────────────────────────────────
 
 _OUTLINE_PATTERN = re.compile(
     r"\[OUTLINE\]\s*\n(.*?)\n\s*\[/OUTLINE\]",
+    re.DOTALL,
+)
+
+# ── 导出指令检测正则 ──────────────────────────────────────────────
+
+_EXPORT_PATTERN = re.compile(
+    r"\[EXPORT\]\s*\n(.*?)\n\s*\[/EXPORT\]",
     re.DOTALL,
 )
 
@@ -152,6 +187,90 @@ def parse_outline(text: str) -> tuple[str, Optional[OutlineData]]:
         return clean_text, outline
     except (json.JSONDecodeError, TypeError) as exc:
         logger.warning("大纲 JSON 解析失败: %s", exc)
+        return text, None
+
+
+def detect_export_intent_from_user(user_input: str) -> Optional[dict]:
+    """
+    通过关键词匹配检测用户输入是否包含导出意图（兜底方案）。
+    当 LLM 未输出 [EXPORT] 标记时，由此函数在后端直接识别用户的导出需求。
+
+    Args:
+        user_input: 用户原始输入文本
+
+    Returns:
+        检测到导出意图时返回 {"format": "...", "content_type": "..."}，
+        否则返回 None
+    """
+    text = user_input.strip().lower()
+
+    # 判断是否包含导出/生成附件相关关键词
+    export_keywords = [
+        "导出", "生成word", "生成pdf", "生成ppt", "转为word", "转为pdf", "转为ppt",
+        "转成word", "转成pdf", "转成ppt", "下载word", "下载pdf", "下载ppt",
+        "生成文档", "导出文档", "生成附件", "导出附件",
+        "word文档", "pdf文档", "ppt文档", "pptx", "docx",
+        "帮我生成一份", "输出为word", "输出为pdf", "输出为ppt",
+        "输出word", "输出pdf", "输出ppt",
+    ]
+
+    has_export_intent = any(kw in text for kw in export_keywords)
+    if not has_export_intent:
+        return None
+
+    # 判断导出格式
+    fmt = "docx"
+    if any(kw in text for kw in ["pdf"]):
+        fmt = "pdf"
+    elif any(kw in text for kw in ["ppt", "pptx", "演示文稿", "幻灯片"]):
+        fmt = "pptx"
+
+    # 判断内容类型
+    content_type = "chat"
+    if any(kw in text for kw in ["需求大纲", "大纲文档"]):
+        content_type = "outline"
+    elif any(kw in text for kw in ["详细设计", "详设", "需求文档", "需求详细"]):
+        content_type = "detail"
+    elif any(kw in text for kw in ["立项报告", "立项", "proposal"]):
+        content_type = "proposal_ppt"
+        if fmt == "docx":
+            fmt = "pptx"
+
+    logger.info("用户输入关键词检测到导出意图: format=%s, content_type=%s, input='%s'",
+                fmt, content_type, user_input[:50])
+    return {"format": fmt, "content_type": content_type}
+
+
+def parse_export_command(text: str) -> tuple[str, Optional[dict]]:
+    """
+    从 LLM 回复文本中检测并提取 [EXPORT] 标记。
+
+    Returns:
+        (clean_text, export_info): clean_text 是去除标记后的纯文本，
+        export_info 在未检测到标记时为 None，否则为
+        {"format": "docx"|"pdf"|"pptx", "content_type": "chat"|"outline"|"detail"|"proposal_ppt"}
+    """
+    match = _EXPORT_PATTERN.search(text)
+    if not match:
+        return text, None
+
+    json_str = match.group(1).strip()
+    clean_text = text[:match.start()].rstrip()
+
+    try:
+        data = json.loads(json_str)
+        fmt = data.get("format", "docx")
+        content_type = data.get("content_type", "chat")
+        # 校验合法值
+        if fmt not in ("docx", "pdf", "pptx"):
+            fmt = "docx"
+        if content_type not in ("chat", "outline", "detail", "proposal_ppt"):
+            content_type = "chat"
+        export_info = {"format": fmt, "content_type": content_type}
+        logger.info("检测到导出指令: format=%s, content_type=%s", fmt, content_type)
+        return clean_text, export_info
+    except (json.JSONDecodeError, TypeError) as exc:
+        logger.warning("导出指令 JSON 解析失败: %s", exc)
         return text, None
 
 
@@ -298,6 +417,7 @@ def chat_stream(session_id: str, user_input: str) -> Generator[dict, None, None]
         dict 事件对象，类型有：
         - {"type": "text", "content": "..."} — 文本片段
         - {"type": "outline", "data": {...}} — 检测到大纲
+        - {"type": "export", "data": {"format": "...", "content_type": "..."}} — 检测到导出指令
         - {"type": "done"} — 结束
     """
     save_message(session_id, "user", user_input)
@@ -316,7 +436,7 @@ def chat_stream(session_id: str, user_input: str) -> Generator[dict, None, None]
         yield {"type": "done"}
         return
 
-    # 解析完整回复，检测是否包含大纲
+    # 解析完整回复，检测是否包含大纲或导出指令（两者互斥）
     clean_text, outline = parse_outline(full_response)
 
     if outline:
@@ -329,11 +449,23 @@ def chat_stream(session_id: str, user_input: str) -> Generator[dict, None, None]
         )
         update_session(
             session_id,
+            status="active",
             outline=json.dumps(outline_dict, ensure_ascii=False),
         )
         yield {"type": "outline", "data": outline_dict}
     else:
-        save_message(session_id, "assistant", full_response)
+        # 尝试检测 LLM 输出中的 [EXPORT] 标记
+        clean_text_export, export_info = parse_export_command(full_response)
+        if export_info:
+            save_message(session_id, "assistant", clean_text_export)
+            yield {"type": "export", "data": export_info}
+        else:
+            save_message(session_id, "assistant", full_response)
+            # 兜底：LLM 未输出 [EXPORT] 标记时，通过用户输入关键词检测导出意图
+            fallback_export = detect_export_intent_from_user(user_input)
+            if fallback_export:
+                logger.info("LLM 未输出 [EXPORT] 标记，使用关键词兜底检测触发导出")
+                yield {"type": "export", "data": fallback_export}
 
     yield {"type": "done"}
 

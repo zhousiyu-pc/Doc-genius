@@ -48,15 +48,25 @@ export interface ChatSession {
   updated_at: string
 }
 
+/** 可选的文档类型 */
+export type DocType = 'outline' | 'detail' | 'proposal_ppt'
+
 export const useChatStore = defineStore('chat', () => {
   // ── 状态 ──────────────────────────────────────────
   const sessions = ref<ChatSession[]>([])
   const currentSessionId = ref<string | null>(null)
   const messages = ref<ChatMessage[]>([])
+  let _abortController: AbortController | null = null
   const streaming = ref(false)
   const streamingContent = ref('')
   const outline = ref<OutlineData | null>(null)
   const confirming = ref(false)
+
+  /** 消息选择导出模式 */
+  const selectMode = ref(false)
+  const selectedMessageIds = ref<Set<string>>(new Set())
+  const exportFormat = ref<string>('docx')
+  const exporting = ref(false)
 
   // ── 计算属性 ──────────────────────────────────────
   const currentSession = computed(() =>
@@ -145,11 +155,20 @@ export const useChatStore = defineStore('chat', () => {
 
   // ── 消息发送（SSE 流式）──────────────────────────
 
+  /** 停止当前流式对话 */
+  function stopStreaming() {
+    if (_abortController) {
+      _abortController.abort()
+      _abortController = null
+    }
+    streaming.value = false
+    streamingContent.value = ''
+  }
+
   /** 发送消息并通过 SSE 接收流式响应 */
   async function sendMessage(content: string) {
     if (!currentSessionId.value || streaming.value) return
 
-    // 立即将用户消息添加到本地列表
     const userMsg: ChatMessage = {
       id: `local_${Date.now()}`,
       role: 'user',
@@ -159,7 +178,6 @@ export const useChatStore = defineStore('chat', () => {
     }
     messages.value.push(userMsg)
 
-    // 预添加一条空的 assistant 消息，用于流式填充
     const assistantMsg: ChatMessage = {
       id: `streaming_${Date.now()}`,
       role: 'assistant',
@@ -171,6 +189,7 @@ export const useChatStore = defineStore('chat', () => {
 
     streaming.value = true
     streamingContent.value = ''
+    _abortController = new AbortController()
 
     try {
       const response = await fetch(
@@ -179,6 +198,7 @@ export const useChatStore = defineStore('chat', () => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ content }),
+          signal: _abortController.signal,
         }
       )
 
@@ -231,7 +251,6 @@ export const useChatStore = defineStore('chat', () => {
             try {
               const outlineData = JSON.parse(eventData) as OutlineData
               outline.value = outlineData
-              // 添加大纲消息
               messages.value.push({
                 id: `outline_${Date.now()}`,
                 role: 'assistant',
@@ -241,6 +260,20 @@ export const useChatStore = defineStore('chat', () => {
                 created_at: new Date().toISOString(),
               })
             } catch { /* 忽略解析失败 */ }
+          } else if (eventType === 'export') {
+            try {
+              const exportInfo = JSON.parse(eventData)
+              if (exportInfo.content_type === 'chat') {
+                // chat 类型：进入消息选择模式，让用户勾选要导出的消息
+                exportFormat.value = exportInfo.format || 'docx'
+                enterSelectMode()
+              } else {
+                // 标准文档类型：直接轮询获取结果
+                startPolling()
+              }
+            } catch {
+              startPolling()
+            }
           } else if (eventType === 'done') {
             // 流结束
           }
@@ -266,14 +299,15 @@ export const useChatStore = defineStore('chat', () => {
 
   // ── 确认大纲 ──────────────────────────────────────
 
-  /** 确认需求大纲，启动 Skill 流水线 */
-  async function confirmOutline(): Promise<boolean> {
+  /** 确认需求大纲，启动 Skill 流水线。docConfigs 指定每个文档类型要导出的格式。 */
+  async function confirmOutline(docConfigs: Record<string, string[]>): Promise<boolean> {
     if (!currentSessionId.value || !outline.value) return false
 
     confirming.value = true
     try {
       const { data } = await axios.post(
-        `/api/chat/sessions/${currentSessionId.value}/confirm`
+        `/api/chat/sessions/${currentSessionId.value}/confirm`,
+        { doc_configs: docConfigs }
       )
       if (data.success) {
         // 更新会话状态
@@ -297,11 +331,14 @@ export const useChatStore = defineStore('chat', () => {
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
 
-  /** 开始轮询会话消息（获取 Skill 生成的产出物） */
+  /** 开始轮询会话消息（获取 Skill 生成的产出物或即时导出结果） */
   function startPolling() {
     stopPolling()
+    let pollCount = 0
+    const maxPolls = 60
     pollTimer = setInterval(async () => {
       if (!currentSessionId.value) return
+      pollCount++
       try {
         const { data } = await axios.get(
           `/api/chat/sessions/${currentSessionId.value}`
@@ -312,12 +349,25 @@ export const useChatStore = defineStore('chat', () => {
           if (session && data.session) {
             session.status = data.session.status
           }
-          // 如果已完成，停止轮询
+          // Pipeline 完成时停止
           if (data.session?.status === 'completed') {
             stopPolling()
+            return
+          }
+          // 即时导出完成时停止（检测最后的 progress 消息是否有 done 标记）
+          const msgs = data.messages as ChatMessage[] || []
+          const lastProgress = [...msgs].reverse().find(
+            (m: ChatMessage) => m.msg_type === 'progress' && m.metadata
+          )
+          if (lastProgress?.metadata && (lastProgress.metadata as Record<string, unknown>).done === true) {
+            stopPolling()
+            return
           }
         }
       } catch { /* 静默忽略轮询错误 */ }
+      if (pollCount >= maxPolls) {
+        stopPolling()
+      }
     }, 3000)
   }
 
@@ -329,10 +379,79 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // ── 消息选择导出模式 ──────────────────────────────
+
+  /** 进入消息选择模式，默认不选中任何消息 */
+  function enterSelectMode() {
+    selectedMessageIds.value = new Set()
+    selectMode.value = true
+  }
+
+  /** 全选所有 AI 文本消息 */
+  function selectAllMessages() {
+    const newSet = new Set<string>()
+    for (const msg of messages.value) {
+      if (msg.role === 'assistant' && msg.msg_type === 'text' && msg.content) {
+        newSet.add(msg.id)
+      }
+    }
+    selectedMessageIds.value = newSet
+  }
+
+  /** 全不选所有消息 */
+  function deselectAllMessages() {
+    selectedMessageIds.value = new Set()
+  }
+
+  /** 退出消息选择模式 */
+  function exitSelectMode() {
+    selectMode.value = false
+    selectedMessageIds.value = new Set()
+  }
+
+  /** 切换某条消息的选中状态 */
+  function toggleMessageSelection(msgId: string) {
+    const newSet = new Set(selectedMessageIds.value)
+    if (newSet.has(msgId)) {
+      newSet.delete(msgId)
+    } else {
+      newSet.add(msgId)
+    }
+    selectedMessageIds.value = newSet
+  }
+
+  /** 提交选中的消息进行导出 */
+  async function exportSelectedMessages(format?: string): Promise<boolean> {
+    if (!currentSessionId.value || selectedMessageIds.value.size === 0) return false
+
+    const fmt = format || exportFormat.value
+    exporting.value = true
+    try {
+      const { data } = await axios.post(
+        `/api/chat/sessions/${currentSessionId.value}/export`,
+        {
+          format: fmt,
+          message_ids: Array.from(selectedMessageIds.value),
+        }
+      )
+      if (data.success) {
+        exitSelectMode()
+        startPolling()
+        return true
+      }
+    } catch (err) {
+      console.error('导出失败:', err)
+    } finally {
+      exporting.value = false
+    }
+    return false
+  }
+
   // ── 重置 ──────────────────────────────────────────
 
   function reset() {
     stopPolling()
+    exitSelectMode()
     currentSessionId.value = null
     messages.value = []
     outline.value = null
@@ -349,6 +468,10 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent,
     outline,
     confirming,
+    selectMode,
+    selectedMessageIds,
+    exportFormat,
+    exporting,
     currentSession,
     isGenerating,
     loadSessions,
@@ -356,7 +479,14 @@ export const useChatStore = defineStore('chat', () => {
     switchSession,
     deleteSession,
     sendMessage,
+    stopStreaming,
     confirmOutline,
+    enterSelectMode,
+    exitSelectMode,
+    selectAllMessages,
+    deselectAllMessages,
+    toggleMessageSelection,
+    exportSelectedMessages,
     startPolling,
     stopPolling,
     reset,

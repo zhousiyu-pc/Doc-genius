@@ -79,6 +79,9 @@ temp/
 # Frontend
 web/node_modules/
 
+# Mermaid CLI (项目根目录)
+node_modules/
+
 # Secrets
 *.pem
 *.key

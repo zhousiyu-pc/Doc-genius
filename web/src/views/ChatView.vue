@@ -85,7 +85,14 @@
             <div
               v-else-if="msg.role === 'assistant' && msg.msg_type === 'text'"
               class="message-bubble assistant-bubble"
+              :class="{ 'select-mode-msg': chatStore.selectMode, 'msg-selected': chatStore.selectMode && chatStore.selectedMessageIds.has(msg.id) }"
             >
+              <el-checkbox
+                v-if="chatStore.selectMode && msg.content"
+                class="msg-select-checkbox"
+                :model-value="chatStore.selectedMessageIds.has(msg.id)"
+                @change="chatStore.toggleMessageSelection(msg.id)"
+              />
               <div class="bubble-avatar">AI</div>
               <div class="bubble-content markdown-body" v-html="renderMarkdown(msg.content)"></div>
             </div>
@@ -147,16 +154,71 @@
                 </div>
 
                 <div class="outline-actions" v-if="chatStore.currentSession?.status === 'active'">
-                  <el-button @click="chatStore.sendMessage('我想调整一下需求大纲')">
-                    返回修改
-                  </el-button>
-                  <el-button
-                    type="primary"
-                    :loading="chatStore.confirming"
-                    @click="handleConfirm"
-                  >
-                    确认，开始生成文档
-                  </el-button>
+                  <div class="doc-config-title">请选择需要生成的文档及导出格式：</div>
+                  
+                  <div class="doc-config-list">
+                    <!-- 需求大纲 -->
+                    <div class="doc-config-card" :class="{ 'is-active': docConfigs.outline.selected }">
+                      <div class="doc-config-header">
+                        <el-checkbox v-model="docConfigs.outline.selected" class="doc-config-checkbox">
+                          <span class="doc-config-label">需求大纲</span>
+                        </el-checkbox>
+                      </div>
+                      <div class="doc-config-body" v-if="docConfigs.outline.selected">
+                        <el-checkbox-group v-model="docConfigs.outline.formats" size="small">
+                          <el-checkbox-button label="pdf">PDF</el-checkbox-button>
+                          <el-checkbox-button label="docx">Word</el-checkbox-button>
+                          <el-checkbox-button label="pptx">PPT</el-checkbox-button>
+                        </el-checkbox-group>
+                      </div>
+                    </div>
+
+                    <!-- 需求详细设计 -->
+                    <div class="doc-config-card" :class="{ 'is-active': docConfigs.detail.selected }">
+                      <div class="doc-config-header">
+                        <el-checkbox v-model="docConfigs.detail.selected" class="doc-config-checkbox">
+                          <span class="doc-config-label">需求详细设计</span>
+                        </el-checkbox>
+                      </div>
+                      <div class="doc-config-body" v-if="docConfigs.detail.selected">
+                        <el-checkbox-group v-model="docConfigs.detail.formats" size="small">
+                          <el-checkbox-button label="pdf">PDF</el-checkbox-button>
+                          <el-checkbox-button label="docx">Word</el-checkbox-button>
+                          <el-checkbox-button label="pptx">PPT</el-checkbox-button>
+                        </el-checkbox-group>
+                      </div>
+                    </div>
+
+                    <!-- 需求立项报告 -->
+                    <div class="doc-config-card" :class="{ 'is-active': docConfigs.proposal_ppt.selected }">
+                      <div class="doc-config-header">
+                        <el-checkbox v-model="docConfigs.proposal_ppt.selected" class="doc-config-checkbox">
+                          <span class="doc-config-label">需求立项报告 (PPT)</span>
+                        </el-checkbox>
+                      </div>
+                      <div class="doc-config-body" v-if="docConfigs.proposal_ppt.selected">
+                        <el-checkbox-group v-model="docConfigs.proposal_ppt.formats" size="small">
+                          <el-checkbox-button label="pdf">PDF</el-checkbox-button>
+                          <el-checkbox-button label="docx">Word</el-checkbox-button>
+                          <el-checkbox-button label="pptx">PPT</el-checkbox-button>
+                        </el-checkbox-group>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="outline-btns">
+                    <el-button @click="chatStore.sendMessage('我想调整一下需求大纲')">
+                      返回修改
+                    </el-button>
+                    <el-button
+                      type="primary"
+                      :loading="chatStore.confirming"
+                      :disabled="!docConfigs.outline.selected && !docConfigs.detail.selected && !docConfigs.proposal_ppt.selected"
+                      @click="handleConfirm"
+                    >
+                      确认，开始生成
+                    </el-button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -187,19 +249,28 @@
                     {{ (msg.metadata as any)?.output_type || 'markdown' }}
                   </el-tag>
                 </div>
-                <div
-                  class="artifact-content markdown-body"
-                  v-html="renderMarkdown(msg.content)"
-                  ref="artifactRefs"
-                ></div>
-                <div class="artifact-footer">
-                  <el-button size="small" @click="copyContent(msg.content)">
-                    复制内容
-                  </el-button>
-                  <el-button size="small" type="primary" @click="downloadArtifact(msg)">
-                    下载文件
+                <!-- 导出文件（PDF/Word/PPT）：仅显示下载按钮 -->
+                <div v-if="isExportArtifact(msg)" class="artifact-export">
+                  <p class="export-desc">{{ exportFormatLabel((msg.metadata as any)?.export_format) }} 已生成，点击下方按钮下载。</p>
+                  <el-button type="primary" size="default" @click="downloadExportFile(msg)">
+                    下载 {{ exportFormatLabel((msg.metadata as any)?.export_format) }}
                   </el-button>
                 </div>
+                <template v-else>
+                  <div
+                    class="artifact-content markdown-body"
+                    v-html="renderMarkdown(msg.content)"
+                    ref="artifactRefs"
+                  ></div>
+                  <div class="artifact-footer">
+                    <el-button size="small" @click="copyContent(msg.content)">
+                      复制内容
+                    </el-button>
+                    <el-button size="small" type="primary" @click="downloadArtifact(msg)">
+                      下载文件
+                    </el-button>
+                  </div>
+                </template>
               </div>
             </div>
 
@@ -221,8 +292,49 @@
           </div>
         </div>
 
+        <!-- 底部：消息选择导出栏（选择模式下替代输入区域） -->
+        <div v-if="chatStore.selectMode" class="export-select-bar">
+          <div class="export-select-left">
+            <div class="export-select-header">
+              <el-icon class="export-icon"><Document /></el-icon>
+              <span class="export-select-title">选择要导出的消息</span>
+              <span class="export-select-count" v-if="chatStore.selectedMessageIds.size > 0">
+                已选 {{ chatStore.selectedMessageIds.size }} 条
+              </span>
+            </div>
+            <div class="export-select-controls">
+              <el-button link type="primary" @click="chatStore.selectAllMessages()">全选</el-button>
+              <el-divider direction="vertical" />
+              <el-button link type="info" @click="chatStore.deselectAllMessages()">全不选</el-button>
+            </div>
+          </div>
+          
+          <div class="export-select-right">
+            <div class="export-format-wrapper">
+              <span class="format-label">格式：</span>
+              <el-radio-group v-model="selectedExportFormat" size="default" class="export-format-group">
+                <el-radio-button value="docx">Word</el-radio-button>
+                <el-radio-button value="pdf">PDF</el-radio-button>
+                <el-radio-button value="pptx">PPT</el-radio-button>
+              </el-radio-group>
+            </div>
+            <div class="export-select-actions">
+              <el-button size="default" plain @click="chatStore.exitSelectMode()">取消</el-button>
+              <el-button
+                type="primary"
+                size="default"
+                :loading="chatStore.exporting"
+                :disabled="chatStore.selectedMessageIds.size === 0"
+                @click="handleExportSelected"
+              >
+                生成文档
+              </el-button>
+            </div>
+          </div>
+        </div>
+
         <!-- 底部输入区域 -->
-        <div class="input-area">
+        <div v-else class="input-area">
           <div class="input-wrapper">
             <el-input
               v-model="inputText"
@@ -233,18 +345,29 @@
               @keydown.enter.exact.prevent="handleSend"
               :disabled="chatStore.streaming || chatStore.isGenerating"
             />
+            <!-- 发送 / 停止按钮 -->
             <el-button
+              v-if="!chatStore.streaming"
               type="primary"
               circle
               class="send-btn"
-              :disabled="!inputText.trim() || chatStore.streaming"
+              :disabled="!inputText.trim()"
               @click="handleSend"
             >
               <el-icon><Promotion /></el-icon>
             </el-button>
+            <el-button
+              v-else
+              type="danger"
+              circle
+              class="send-btn"
+              @click="handleStop"
+            >
+              <el-icon><VideoPause /></el-icon>
+            </el-button>
           </div>
           <div class="input-hint">
-            按 Enter 发送，Shift+Enter 换行
+            {{ chatStore.streaming ? '点击红色按钮停止生成' : '按 Enter 发送，Shift+Enter 换行' }}
           </div>
         </div>
       </div>
@@ -261,7 +384,7 @@ import { ref, onMounted, nextTick, watch, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Delete, Loading, CircleCheckFilled, Document, Promotion
+  Delete, Loading, CircleCheckFilled, Document, Promotion, VideoPause
 } from '@element-plus/icons-vue'
 import mermaid from 'mermaid'
 import { useChatStore } from '@/stores/chat'
@@ -272,6 +395,27 @@ const router = useRouter()
 const chatStore = useChatStore()
 const inputText = ref('')
 const messagesArea = ref<HTMLElement | null>(null)
+
+// 每个文档类型的配置状态
+const docConfigs = ref({
+  outline: { selected: false, formats: ['docx'] },
+  detail: { selected: true, formats: ['docx'] },
+  proposal_ppt: { selected: false, formats: ['pptx'] },
+})
+
+// 当复选框被勾选时，如果没有格式被选中，恢复默认格式
+watch(() => docConfigs.value.outline.selected, (val) => {
+  if (val && docConfigs.value.outline.formats.length === 0) docConfigs.value.outline.formats = ['docx']
+})
+watch(() => docConfigs.value.detail.selected, (val) => {
+  if (val && docConfigs.value.detail.formats.length === 0) docConfigs.value.detail.formats = ['docx']
+})
+watch(() => docConfigs.value.proposal_ppt.selected, (val) => {
+  if (val && docConfigs.value.proposal_ppt.formats.length === 0) docConfigs.value.proposal_ppt.formats = ['pptx']
+})
+
+// 消息选择模式下的导出格式
+const selectedExportFormat = ref('docx')
 
 const quickExamples = [
   '帮我做一个保险公司的智能培训系统',
@@ -284,10 +428,34 @@ mermaid.initialize({
   startOnLoad: false,
   theme: 'default',
   securityLevel: 'loose',
+  suppressErrorRendering: true,
   flowchart: { useMaxWidth: true, htmlLabels: true },
 })
 
-/** 渲染页面中所有未渲染的 Mermaid 代码块 */
+/** 清理 Mermaid 渲染失败时残留在 body 中的错误元素 */
+function cleanupMermaidErrors(renderId: string) {
+  const orphan = document.getElementById(renderId)
+  if (orphan) orphan.remove()
+  const dOrphan = document.getElementById('d' + renderId)
+  if (dOrphan) dOrphan.remove()
+  document.querySelectorAll('[id^="mermaid-"] [id*="err"]').forEach(el => {
+    const parent = el.closest('[id^="dmermaid-"]')
+    if (parent && !parent.closest('.mermaid-block')) parent.remove()
+  })
+}
+
+/** 构建 Mermaid 渲染失败时的降级提示 HTML */
+function buildMermaidFallback(code: string): string {
+  return `<div class="mermaid-fallback">
+    <div class="mermaid-fallback-msg">
+      图表语法暂无法自动渲染，可复制下方代码到
+      <a href="https://mermaid.live" target="_blank" rel="noopener">Mermaid Live</a> 在线查看
+    </div>
+    <pre class="mermaid-fallback-code">${escapeHtml(code)}</pre>
+  </div>`
+}
+
+/** 渲染页面中所有未渲染的 Mermaid 代码块；失败时显示源码与友好提示 */
 async function renderMermaidBlocks() {
   await nextTick()
   const blocks = document.querySelectorAll('.mermaid-source:not(.mermaid-rendered)')
@@ -295,22 +463,53 @@ async function renderMermaidBlocks() {
     const el = blocks[i] as HTMLElement
     const code = el.textContent?.trim() || ''
     if (!code) continue
+    el.classList.add('mermaid-rendered')
+    const container = el.parentElement
+    if (!container) continue
+
+    const id = `mermaid-${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${i}`
+
+    // 先用 parse 验证语法，避免 render 在 DOM 中注入错误元素
+    let syntaxOk = false
     try {
-      const id = `mermaid-${Date.now()}-${i}`
+      await mermaid.parse(code)
+      syntaxOk = true
+    } catch {
+      syntaxOk = false
+    }
+
+    if (!syntaxOk) {
+      container.innerHTML = buildMermaidFallback(code)
+      container.classList.add('mermaid-rendered-container')
+      continue
+    }
+
+    try {
       const { svg } = await mermaid.render(id, code)
-      const container = el.parentElement
-      if (container) {
-        container.innerHTML = svg
-        container.classList.add('mermaid-rendered-container')
-      }
-    } catch (err) {
-      el.classList.add('mermaid-rendered')
-      console.warn('Mermaid 渲染失败:', err)
+      container.innerHTML = svg
+      container.classList.add('mermaid-rendered-container')
+    } catch {
+      cleanupMermaidErrors(id)
+      container.innerHTML = buildMermaidFallback(code)
+      container.classList.add('mermaid-rendered-container')
     }
   }
 }
 
+function escapeHtml(text: string): string {
+  const div = document.createElement('div')
+  div.textContent = text
+  return div.innerHTML
+}
+
+/** 清理 body 中所有 Mermaid 渲染残留的孤立错误元素 */
+function cleanupAllMermaidOrphans() {
+  document.querySelectorAll('body > [id^="dmermaid-"], body > svg[id^="mermaid-"]').forEach(el => el.remove())
+  document.querySelectorAll('body > #d[id], body > [data-mermaid-temp]').forEach(el => el.remove())
+}
+
 onMounted(async () => {
+  cleanupAllMermaidOrphans()
   await chatStore.loadSessions()
   const sessionId = route.params.sessionId as string
   if (sessionId) {
@@ -320,6 +519,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   chatStore.stopPolling()
+  cleanupAllMermaidOrphans()
 })
 
 /** 滚动到消息底部 */
@@ -442,6 +642,7 @@ async function handleQuickStart(example: string) {
 
 /** 切换会话 */
 async function handleSwitchSession(sessionId: string) {
+  cleanupAllMermaidOrphans()
   await chatStore.switchSession(sessionId)
   router.replace({ name: 'chatSession', params: { sessionId } })
   // 如果正在生成中，恢复轮询
@@ -468,15 +669,60 @@ async function handleSend() {
   await chatStore.sendMessage(text)
 }
 
-/** 确认大纲 */
+/** 停止当前对话生成 */
+function handleStop() {
+  chatStore.stopStreaming()
+  ElMessage.info('已停止生成')
+}
+
+/** 导出用户选中的消息 */
+async function handleExportSelected() {
+  const count = chatStore.selectedMessageIds.size
+  if (count === 0) {
+    ElMessage.warning('请至少选择一条消息')
+    return
+  }
+  const ok = await chatStore.exportSelectedMessages(selectedExportFormat.value)
+  if (ok) {
+    ElMessage.success('文档导出已启动，请稍候...')
+  } else {
+    ElMessage.error('导出失败，请重试')
+  }
+}
+
+/** 确认大纲，传入按文档类型配置的导出格式 */
 async function handleConfirm() {
+  const configs: Record<string, string[]> = {}
+  const typeLabels: Record<string, string> = {
+    outline: '需求大纲',
+    detail: '需求详细设计',
+    proposal_ppt: '需求立项报告',
+  }
+  const formatLabels: Record<string, string> = { pdf: 'PDF', docx: 'Word', pptx: 'PPT' }
+  const selectedLabels: string[] = []
+
+  for (const [key, config] of Object.entries(docConfigs.value)) {
+    if (config.selected) {
+      configs[key] = config.formats
+      const fmtStr = config.formats.length > 0
+        ? `(${config.formats.map(f => formatLabels[f] || f).join('/')})`
+        : '(不导出)'
+      selectedLabels.push(`${typeLabels[key]}${fmtStr}`)
+    }
+  }
+
+  if (Object.keys(configs).length === 0) {
+    ElMessage.warning('请至少选择一种文档类型')
+    return
+  }
+
   try {
     await ElMessageBox.confirm(
-      '将基于当前需求大纲，并行生成需求文档、流程图、ER 图、测试用例和 API 文档。是否继续？',
+      `将生成以下内容：\n\n${selectedLabels.join('\n')}\n\n是否继续？`,
       '确认生成',
       { type: 'info', confirmButtonText: '开始生成', cancelButtonText: '再想想' },
     )
-    const ok = await chatStore.confirmOutline()
+    const ok = await chatStore.confirmOutline(configs)
     if (ok) {
       ElMessage.success('文档生成已启动，请稍候...')
     } else {
@@ -492,6 +738,58 @@ async function copyContent(content: string) {
     ElMessage.success('已复制到剪贴板')
   } catch {
     ElMessage.error('复制失败')
+  }
+}
+
+/** 是否为导出文件类产出物（PDF/Word/PPT） */
+function isExportArtifact(msg: ChatMessage): boolean {
+  const meta = msg.metadata as Record<string, unknown> | undefined
+  const fmt = meta?.export_format as string | undefined
+  const filename = meta?.filename as string | undefined
+  return (fmt === 'pdf' || fmt === 'docx' || fmt === 'pptx') && !!filename
+}
+
+/** 导出格式中文标签 */
+function exportFormatLabel(fmt: string): string {
+  const map: Record<string, string> = { pdf: 'PDF', docx: 'Word', pptx: 'PPT' }
+  return map[fmt] || fmt
+}
+
+/** 导出文件下载地址（会话内 PDF/Word/PPT） */
+function exportFileUrl(msg: ChatMessage): string {
+  const sid = chatStore.currentSessionId
+  const filename = (msg.metadata as Record<string, unknown>)?.filename as string
+  if (!sid || !filename) return '#'
+  return `/api/chat/sessions/${sid}/files/${encodeURIComponent(filename)}`
+}
+
+/** 编程式下载导出文件，避免 target="_blank" 被浏览器拦截 */
+async function downloadExportFile(msg: ChatMessage) {
+  const url = exportFileUrl(msg)
+  if (url === '#') {
+    ElMessage.error('下载地址无效')
+    return
+  }
+  const filename = (msg.metadata as Record<string, unknown>)?.filename as string || 'download'
+  try {
+    const resp = await fetch(url)
+    if (!resp.ok) {
+      const text = await resp.text()
+      ElMessage.error(`下载失败：${text}`)
+      return
+    }
+    const blob = await resp.blob()
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(blobUrl)
+  } catch (err) {
+    console.error('下载失败:', err)
+    ElMessage.error('下载失败，请重试')
   }
 }
 
@@ -860,6 +1158,54 @@ function downloadArtifact(msg: ChatMessage) {
 
 .outline-actions {
   margin-top: 16px;
+}
+
+.doc-config-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 12px;
+}
+
+.doc-config-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.doc-config-card {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafafa;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.doc-config-card.is-active {
+  border-color: #409eff;
+  background: #f0f7ff;
+}
+
+.doc-config-header {
+  padding: 10px 14px;
+}
+
+.doc-config-checkbox {
+  margin-right: 0;
+  width: 100%;
+}
+
+.doc-config-label {
+  font-weight: bold;
+  color: #303133;
+}
+
+.doc-config-body {
+  padding: 0 14px 12px 38px;
+}
+
+.outline-btns {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
@@ -907,6 +1253,21 @@ function downloadArtifact(msg: ChatMessage) {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.artifact-export {
+  padding: 20px 16px;
+  text-align: center;
+}
+
+.export-desc {
+  color: #606266;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.export-download-link {
+  text-decoration: none;
 }
 
 /* ── 打字指示器 ──────────────────────────── */
@@ -1058,6 +1419,151 @@ function downloadArtifact(msg: ChatMessage) {
   overflow-x: auto;
 }
 
+.markdown-body :deep(.mermaid-fallback) {
+  font-size: 13px;
+}
+
+.markdown-body :deep(.mermaid-fallback-msg) {
+  color: #909399;
+  margin-bottom: 8px;
+}
+
+.markdown-body :deep(.mermaid-fallback-msg a) {
+  color: #409eff;
+  text-decoration: none;
+}
+
+.markdown-body :deep(.mermaid-fallback-code) {
+  background: #f5f7fa;
+  border-radius: 6px;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #303133;
+  white-space: pre;
+}
+
+/* ── 消息选择导出模式 ──────────────────────── */
+
+.select-mode-msg {
+  position: relative;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 2px solid transparent;
+  border-radius: 12px;
+}
+
+.select-mode-msg:hover {
+  border-color: #dcdfe6;
+  background-color: #fafafa;
+}
+
+.msg-selected {
+  border-color: #409eff !important;
+  background: #f0f7ff !important;
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.15);
+}
+
+.msg-select-checkbox {
+  position: absolute;
+  left: -12px;
+  top: 12px;
+  z-index: 2;
+  transform: scale(1.1);
+}
+
+.export-select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  background: #ffffff;
+  border-top: 1px solid #e4e7ed;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.05);
+  gap: 16px;
+  border-radius: 12px 12px 0 0;
+  margin: 0 16px;
+  position: relative;
+  top: -16px;
+}
+
+.export-select-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.export-select-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.export-icon {
+  font-size: 18px;
+  color: #409eff;
+}
+
+.export-select-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.export-select-count {
+  font-size: 13px;
+  color: #67c23a;
+  background: #f0f9eb;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.export-select-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.export-select-controls .el-button {
+  padding: 0 4px;
+  font-size: 13px;
+}
+
+.export-select-right {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.export-format-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f5f7fa;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.format-label {
+  font-size: 14px;
+  color: #606266;
+  margin-left: 6px;
+}
+
+.export-format-group {
+  flex-shrink: 0;
+}
+
+.export-select-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
 /* ── 响应式 ──────────────────────────────── */
 @media (max-width: 768px) {
   .chat-sidebar {
@@ -1068,6 +1574,25 @@ function downloadArtifact(msg: ChatMessage) {
   }
   .outline-card {
     min-width: auto;
+  }
+  @media (max-width: 768px) {
+    .export-select-bar {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 16px;
+      margin: 0;
+      top: 0;
+      border-radius: 0;
+    }
+    .export-select-right {
+      width: 100%;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 12px;
+    }
+    .export-select-actions {
+      justify-content: flex-end;
+    }
   }
 }
 </style>
