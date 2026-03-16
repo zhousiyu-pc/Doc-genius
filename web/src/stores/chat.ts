@@ -32,7 +32,7 @@ export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
-  msg_type: 'text' | 'outline' | 'progress' | 'artifact'
+  msg_type: 'text' | 'outline' | 'progress' | 'artifact' | 'file' | 'milestone'
   metadata?: Record<string, unknown>
   created_at: string
 }
@@ -42,6 +42,8 @@ export interface ChatSession {
   id: string
   title: string
   status: 'active' | 'confirmed' | 'generating' | 'completed'
+  mode: 'free' | 'agile'
+  current_stage: string
   outline?: OutlineData | null
   task_id?: string
   created_at: string
@@ -62,11 +64,20 @@ export const useChatStore = defineStore('chat', () => {
   const outline = ref<OutlineData | null>(null)
   const confirming = ref(false)
 
+  /** 文件上传状态 */
+  const uploading = ref(false)
+
   /** 消息选择导出模式 */
   const selectMode = ref(false)
   const selectedMessageIds = ref<Set<string>>(new Set())
   const exportFormat = ref<string>('docx')
   const exporting = ref(false)
+
+  /** 敏捷模式：环节大纲摘要（各环节成果） */
+  const stageSummaries = ref<Array<{ stage: string; label: string; title: string; content: string; msg_id?: string }>>([])
+
+  /** 敏捷模式：待确认的环节完成询问（AI 输出 [STAGE_READY] 时设置） */
+  const stageReady = ref<{ stage: string; summary?: string } | null>(null)
 
   // ── 计算属性 ──────────────────────────────────────
   const currentSession = computed(() =>
@@ -92,14 +103,16 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /** 创建新会话 */
-  async function createSession(title = ''): Promise<string | null> {
+  async function createSession(title = '', mode = 'free'): Promise<string | null> {
     try {
-      const { data } = await axios.post('/api/chat/sessions', { title })
+      const { data } = await axios.post('/api/chat/sessions', { title, mode })
       if (data.success) {
         const newSession: ChatSession = {
           id: data.id,
           title: data.title || '',
           status: 'active',
+          mode: data.mode || 'free',
+          current_stage: data.current_stage || 'discovery',
           created_at: data.created_at,
           updated_at: data.created_at,
         }
@@ -110,6 +123,95 @@ export const useChatStore = defineStore('chat', () => {
       console.error('创建会话失败:', err)
     }
     return null
+  }
+
+  /** 加载环节大纲摘要（敏捷模式） */
+  async function loadStageSummaries(sessionId: string) {
+    try {
+      const { data } = await axios.get(`/api/chat/sessions/${sessionId}/stage_summaries`)
+      if (data.success) {
+        stageSummaries.value = data.summaries || []
+      }
+    } catch (err) {
+      console.error('加载环节摘要失败:', err)
+    }
+  }
+
+  /** 用户确认进入下一环节 */
+  async function advanceStage(sessionId: string): Promise<boolean> {
+    try {
+      const { data } = await axios.post(`/api/chat/sessions/${sessionId}/advance_stage`)
+      if (data.success) {
+        const session = sessions.value.find(s => s.id === sessionId)
+        if (session) {
+          session.current_stage = data.next_stage
+        }
+        stageReady.value = null
+        await loadStageSummaries(sessionId)
+        return true
+      }
+    } catch (err) {
+      console.error('进入下一环节失败:', err)
+    }
+    return false
+  }
+
+  /** 按环节导出附件 */
+  async function exportStage(sessionId: string, stageId: string, format: string): Promise<boolean> {
+    try {
+      const { data } = await axios.post(`/api/chat/sessions/${sessionId}/export_stage`, {
+        stage: stageId,
+        format,
+      })
+      if (data.success) {
+        startPolling()
+        return true
+      }
+    } catch (err) {
+      console.error('环节导出失败:', err)
+    }
+    return false
+  }
+
+  /** 清除环节完成询问状态 */
+  function clearStageReady() {
+    stageReady.value = null
+  }
+
+  /** 手动切换会话阶段 */
+  async function updateStage(sessionId: string, stage: string) {
+    try {
+      const { data } = await axios.post(`/api/chat/sessions/${sessionId}/stage`, { stage })
+      if (data.success) {
+        const session = sessions.value.find(s => s.id === sessionId)
+        if (session) {
+          session.current_stage = stage
+        }
+      }
+    } catch (err) {
+      console.error('更新阶段失败:', err)
+    }
+  }
+
+  /**
+   * 重命名会话标题。
+   * @param sessionId 会话 ID
+   * @param newTitle 新标题
+   */
+  async function renameSession(sessionId: string, newTitle: string): Promise<boolean> {
+    try {
+      const { data } = await axios.put(`/api/chat/sessions/${sessionId}/rename`, { title: newTitle })
+      if (data.success) {
+        const session = sessions.value.find(s => s.id === sessionId)
+        if (session) {
+          session.title = data.title
+        }
+        return true
+      }
+    } catch (err) {
+      console.error('重命名会话失败:', err)
+    }
+    return false
   }
 
   /** 切换到指定会话并加载消息 */
@@ -131,6 +233,13 @@ export const useChatStore = defineStore('chat', () => {
         const idx = sessions.value.findIndex(s => s.id === sessionId)
         if (idx !== -1) {
           sessions.value[idx] = { ...sessions.value[idx], ...data.session }
+        }
+        // 敏捷模式：加载环节大纲
+        if (data.session?.mode === 'agile') {
+          await loadStageSummaries(sessionId)
+        } else {
+          stageSummaries.value = []
+          stageReady.value = null
         }
       }
     } catch (err) {
@@ -260,6 +369,46 @@ export const useChatStore = defineStore('chat', () => {
                 created_at: new Date().toISOString(),
               })
             } catch { /* 忽略解析失败 */ }
+          } else if (eventType === 'stage_update') {
+            try {
+              const stageData = JSON.parse(eventData)
+              const session = sessions.value.find(s => s.id === currentSessionId.value)
+              if (session) {
+                session.current_stage = stageData.next_stage
+              }
+            } catch { /* 忽略 */ }
+          } else if (eventType === 'stage_ready') {
+            try {
+              const stageData = JSON.parse(eventData)
+              stageReady.value = { stage: stageData.stage, summary: stageData.summary }
+            } catch { /* 忽略 */ }
+          } else if (eventType === 'stage_advance') {
+            try {
+              const stageData = JSON.parse(eventData)
+              const session = sessions.value.find(s => s.id === currentSessionId.value)
+              if (session) {
+                session.current_stage = stageData.next_stage
+              }
+              stageReady.value = null
+              if (currentSessionId.value) {
+                loadStageSummaries(currentSessionId.value)
+              }
+            } catch { /* 忽略 */ }
+          } else if (eventType === 'milestone') {
+            try {
+              const milestoneData = JSON.parse(eventData)
+              messages.value.push({
+                id: `milestone_${Date.now()}`,
+                role: 'assistant',
+                content: milestoneData.content || '',
+                msg_type: 'milestone',
+                metadata: milestoneData,
+                created_at: new Date().toISOString(),
+              })
+              if (currentSessionId.value) {
+                loadStageSummaries(currentSessionId.value)
+              }
+            } catch { /* 忽略 */ }
           } else if (eventType === 'export') {
             try {
               const exportInfo = JSON.parse(eventData)
@@ -447,6 +596,64 @@ export const useChatStore = defineStore('chat', () => {
     return false
   }
 
+  // ── 文件上传 ──────────────────────────────────────
+
+  /**
+   * 上传文件到当前会话，系统提取文件文本后保存为 file 类型消息。
+   * 上传成功后自动在对话中显示文件消息气泡。
+   * 注意：文件上传只保存文件内容，用户的指令文字由 sendMessage 单独处理。
+   *
+   * @param file 用户选择的文件
+   * @returns 上传结果对象，失败时返回 null
+   */
+  async function uploadFile(file: File): Promise<Record<string, unknown> | null> {
+    if (!currentSessionId.value || uploading.value) return null
+
+    uploading.value = true
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await fetch(
+        `/api/chat/sessions/${currentSessionId.value}/upload`,
+        { method: 'POST', body: formData }
+      )
+
+      const result = await response.json()
+      if (!result.success) {
+        console.error('文件上传失败:', result.message)
+        return null
+      }
+
+      const fileMsg: ChatMessage = {
+        id: result.file_msg_id,
+        role: 'user',
+        content: result.preview || '',
+        msg_type: 'file',
+        metadata: {
+          filename: result.filename,
+          file_size: result.file_size,
+          file_type: result.file_type,
+          char_count: result.char_count,
+        },
+        created_at: new Date().toISOString(),
+      }
+      messages.value.push(fileMsg)
+
+      const session = sessions.value.find(s => s.id === currentSessionId.value)
+      if (session && !session.title) {
+        session.title = `上传: ${result.filename}`.slice(0, 30)
+      }
+
+      return result
+    } catch (err) {
+      console.error('文件上传失败:', err)
+      return null
+    } finally {
+      uploading.value = false
+    }
+  }
+
   // ── 重置 ──────────────────────────────────────────
 
   function reset() {
@@ -458,6 +665,8 @@ export const useChatStore = defineStore('chat', () => {
     streaming.value = false
     streamingContent.value = ''
     confirming.value = false
+    stageSummaries.value = []
+    stageReady.value = null
   }
 
   return {
@@ -468,7 +677,10 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent,
     outline,
     confirming,
+    uploading,
     selectMode,
+    stageSummaries,
+    stageReady,
     selectedMessageIds,
     exportFormat,
     exporting,
@@ -476,6 +688,12 @@ export const useChatStore = defineStore('chat', () => {
     isGenerating,
     loadSessions,
     createSession,
+    renameSession,
+    loadStageSummaries,
+    advanceStage,
+    exportStage,
+    clearStageReady,
+    updateStage,
     switchSession,
     deleteSession,
     sendMessage,
@@ -487,6 +705,7 @@ export const useChatStore = defineStore('chat', () => {
     deselectAllMessages,
     toggleMessageSelection,
     exportSelectedMessages,
+    uploadFile,
     startPolling,
     stopPolling,
     reset,

@@ -423,6 +423,70 @@ def run_adhoc_export(
     )
 
 
+def run_stage_export(
+    session_id: str,
+    stage_id: str,
+    export_format: str,
+) -> None:
+    """
+    按环节导出：将指定环节的 milestone 内容导出为 Word/PDF/PPT。
+    用于敏捷模式下用户选择「生成本环节附件」。
+
+    Args:
+        session_id: 会话 ID
+        stage_id: 环节 ID（如 discovery, business_case 等）
+        export_format: 导出格式 (docx / pdf / pptx)
+    """
+    from core.conversation import get_session, get_messages, get_stage_summaries, save_message
+
+    session = get_session(session_id)
+    if not session:
+        logger.error("环节导出失败: 会话 %s 不存在", session_id)
+        return
+
+    summaries = get_stage_summaries(session_id)
+    stage_summary = next((s for s in summaries if s["stage"] == stage_id), None)
+    if not stage_summary or not stage_summary.get("content"):
+        save_message(
+            session_id, "system",
+            f"导出失败：环节「{stage_summary.get('label', stage_id) if stage_summary else stage_id}」暂无内容。",
+            msg_type="progress",
+            metadata={"error": True},
+        )
+        return
+
+    project_name = "对话内容"
+    if session.get("outline"):
+        try:
+            import json as _json
+            outline_data = _json.loads(session["outline"]) if isinstance(session["outline"], str) else session["outline"]
+            project_name = outline_data.get("project_name") or project_name
+        except Exception:
+            pass
+
+    contents = [(stage_summary.get("title", "环节成果"), stage_summary["content"])]
+    fmt_labels = {"pdf": "PDF", "docx": "Word", "pptx": "PPT"}
+    save_message(
+        session_id, "system",
+        f"正在将「{stage_summary.get('label', stage_id)}」导出为 {fmt_labels.get(export_format, export_format)}...",
+        msg_type="progress",
+        metadata={"exporting": True},
+    )
+
+    _run_export_skills(
+        session_id, project_name, contents,
+        export_formats=[export_format],
+        filename_suffix=f"_{stage_summary.get('label', stage_id)}",
+    )
+
+    save_message(
+        session_id, "system",
+        "文档导出完成！",
+        msg_type="progress",
+        metadata={"done": True},
+    )
+
+
 def run_selected_export(
     session_id: str,
     export_format: str,
@@ -502,6 +566,18 @@ async def run_selected_export_async(
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(
         None, run_selected_export, session_id, export_format, message_ids
+    )
+
+
+async def run_stage_export_async(
+    session_id: str,
+    stage_id: str,
+    export_format: str,
+) -> None:
+    """异步包装：在线程池中运行环节导出。"""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None, run_stage_export, session_id, stage_id, export_format
     )
 
 

@@ -100,9 +100,10 @@ def init_db():
             ON chat_messages(session_id);
     """)
 
-    # 兼容旧库：给 tasks 表添加 result_file 列（如已存在则忽略）
+    # 兼容旧库：给 chat_sessions 表添加 mode 和 current_stage 列
     for alter_sql in [
-        "ALTER TABLE tasks ADD COLUMN result_file TEXT",
+        "ALTER TABLE chat_sessions ADD COLUMN mode TEXT DEFAULT 'free'",
+        "ALTER TABLE chat_sessions ADD COLUMN current_stage TEXT DEFAULT 'discovery'",
     ]:
         try:
             conn.execute(alter_sql)

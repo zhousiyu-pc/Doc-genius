@@ -23,9 +23,11 @@ from core.conversation import (
     list_sessions,
     delete_session,
     get_messages,
+    get_stage_summaries,
     chat_stream,
     confirm_outline,
     update_session,
+    advance_stage,
 )
 
 logger = logging.getLogger("agent_skills.conversation.routes")
@@ -38,8 +40,132 @@ async def api_create_session(request: Request) -> JSONResponse:
     except Exception:
         body = {}
     title = body.get("title", "")
-    session = create_session(title)
+    mode = body.get("mode", "free")
+    session = create_session(title, mode)
     return JSONResponse({"success": True, **session})
+
+
+async def api_update_session_stage(request: Request) -> JSONResponse:
+    """POST /api/chat/sessions/{id}/stage — 手动更新会话阶段"""
+    session_id = request.path_params["id"]
+    try:
+        body = await request.json()
+    except:
+        return JSONResponse({"success": False, "message": "无效的请求体"}, status_code=400)
+    
+    new_stage = body.get("stage")
+    if not new_stage:
+        return JSONResponse({"success": False, "message": "未指定阶段"}, status_code=400)
+    
+    update_session(session_id, current_stage=new_stage)
+    return JSONResponse({"success": True, "stage": new_stage})
+
+
+async def api_get_stage_summaries(request: Request) -> JSONResponse:
+    """GET /api/chat/sessions/{id}/stage_summaries — 获取敏捷模式各环节成果摘要"""
+    session_id = request.path_params["id"]
+    session = get_session(session_id)
+    if not session:
+        return JSONResponse(
+            {"success": False, "message": "会话不存在"}, status_code=404
+        )
+    if session.get("mode") != "agile":
+        return JSONResponse(
+            {"success": True, "summaries": []},
+        )
+    summaries = get_stage_summaries(session_id)
+    return JSONResponse({"success": True, "summaries": summaries})
+
+
+async def api_advance_stage(request: Request) -> JSONResponse:
+    """POST /api/chat/sessions/{id}/advance_stage — 用户确认进入下一环节"""
+    session_id = request.path_params["id"]
+    session = get_session(session_id)
+    if not session:
+        return JSONResponse(
+            {"success": False, "message": "会话不存在"}, status_code=404
+        )
+    if session.get("mode") != "agile":
+        return JSONResponse(
+            {"success": False, "message": "仅敏捷模式支持"}, status_code=400
+        )
+    result = advance_stage(session_id)
+    if not result:
+        return JSONResponse(
+            {"success": False, "message": "已是最后一环节或无法切换"}, status_code=400
+        )
+    return JSONResponse({"success": True, **result})
+
+
+async def api_export_stage(request: Request) -> JSONResponse:
+    """POST /api/chat/sessions/{id}/export_stage — 按环节导出附件"""
+    session_id = request.path_params["id"]
+    session = get_session(session_id)
+    if not session:
+        return JSONResponse(
+            {"success": False, "message": "会话不存在"}, status_code=404
+        )
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"success": False, "message": "无效的请求体"}, status_code=400
+        )
+    stage_id = body.get("stage")
+    export_format = body.get("format", "docx")
+    if not stage_id:
+        return JSONResponse(
+            {"success": False, "message": "未指定环节"}, status_code=400
+        )
+    if export_format not in ("docx", "pdf", "pptx"):
+        return JSONResponse(
+            {"success": False, "message": "不支持的格式"}, status_code=400
+        )
+    try:
+        from skills.pipeline import run_stage_export_async
+        asyncio.ensure_future(
+            run_stage_export_async(session_id, stage_id, export_format)
+        )
+    except Exception as exc:
+        logger.exception("启动环节导出失败: %s", exc)
+        return JSONResponse(
+            {"success": False, "message": str(exc)}, status_code=500
+        )
+    return JSONResponse({
+        "success": True,
+        "message": f"已启动环节导出（{export_format}）",
+    })
+
+
+async def api_rename_session(request: Request) -> JSONResponse:
+    """
+    PUT /api/chat/sessions/{id}/rename — 重命名会话标题。
+
+    请求体: {"title": "新标题"}
+    """
+    session_id = request.path_params["id"]
+    session = get_session(session_id)
+    if not session:
+        return JSONResponse(
+            {"success": False, "message": "会话不存在"}, status_code=404
+        )
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"success": False, "message": "无效的请求体"}, status_code=400
+        )
+
+    new_title = body.get("title", "").strip()
+    if not new_title:
+        return JSONResponse(
+            {"success": False, "message": "标题不能为空"}, status_code=400
+        )
+    if len(new_title) > 100:
+        new_title = new_title[:100]
+
+    update_session(session_id, title=new_title)
+    return JSONResponse({"success": True, "title": new_title})
 
 
 async def api_list_sessions(request: Request) -> JSONResponse:
@@ -103,6 +229,18 @@ async def _sse_generator(session_id: str, content: str) -> AsyncGenerator[str, N
             elif evt_type == "outline":
                 data = json.dumps(event["data"], ensure_ascii=False)
                 yield f"event: outline\ndata: {data}\n\n"
+            elif evt_type == "stage_update":
+                data = json.dumps(event["data"], ensure_ascii=False)
+                yield f"event: stage_update\ndata: {data}\n\n"
+            elif evt_type == "stage_ready":
+                data = json.dumps(event["data"], ensure_ascii=False)
+                yield f"event: stage_ready\ndata: {data}\n\n"
+            elif evt_type == "stage_advance":
+                data = json.dumps(event["data"], ensure_ascii=False)
+                yield f"event: stage_advance\ndata: {data}\n\n"
+            elif evt_type == "milestone":
+                data = json.dumps(event["data"], ensure_ascii=False)
+                yield f"event: milestone\ndata: {data}\n\n"
             elif evt_type == "export":
                 # 推送导出事件给前端，由前端进入消息选择模式
                 export_info = event.get("data", {})
@@ -338,6 +476,110 @@ async def api_export_selected(request: Request) -> JSONResponse:
     })
 
 
+async def api_upload_file(request: Request) -> JSONResponse:
+    """
+    POST /api/chat/sessions/{id}/upload — 上传文件并提取文本内容。
+
+    接受 multipart/form-data 格式的文件上传。
+    将文件内容提取为文本，保存为 msg_type='file' 的消息，
+    文件文本内容会自动纳入后续 LLM 对话上下文。
+
+    表单字段:
+        - file: 上传的文件
+        - message: (可选) 用户对文件的说明或指令
+
+    Returns:
+        JSON 包含消息 ID、文件名、提取的文本预览等信息
+    """
+    session_id = request.path_params["id"]
+    session = get_session(session_id)
+    if not session:
+        return JSONResponse(
+            {"success": False, "message": "会话不存在"}, status_code=404
+        )
+
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" not in content_type:
+        return JSONResponse(
+            {"success": False, "message": "请使用 multipart/form-data 格式上传文件"},
+            status_code=400,
+        )
+
+    form = await request.form()
+    upload_file = form.get("file")
+    user_message = form.get("message", "")
+
+    if not upload_file or not hasattr(upload_file, "read"):
+        return JSONResponse(
+            {"success": False, "message": "未找到上传文件"}, status_code=400
+        )
+
+    filename = getattr(upload_file, "filename", "unknown")
+    file_bytes = await upload_file.read()
+    file_size = len(file_bytes)
+
+    if file_size == 0:
+        return JSONResponse(
+            {"success": False, "message": "文件为空"}, status_code=400
+        )
+
+    from core.file_reader import extract_text, get_file_type_label, MAX_FILE_SIZE
+    from core.conversation import save_message
+
+    if file_size > MAX_FILE_SIZE:
+        return JSONResponse(
+            {"success": False, "message": f"文件大小超过限制（最大 {MAX_FILE_SIZE // 1024 // 1024} MB）"},
+            status_code=400,
+        )
+
+    extracted_text, error = extract_text(file_bytes, filename)
+    if error:
+        return JSONResponse(
+            {"success": False, "message": f"文件读取失败: {error}"}, status_code=400
+        )
+
+    file_type_label = get_file_type_label(filename)
+
+    # 保存文件消息：角色为 user，类型为 file
+    file_metadata = {
+        "filename": filename,
+        "file_size": file_size,
+        "file_type": file_type_label,
+        "char_count": len(extracted_text),
+    }
+    msg_id = save_message(
+        session_id,
+        "user",
+        extracted_text,
+        msg_type="file",
+        metadata=file_metadata,
+    )
+
+    # 如果用户附带了说明文字，额外保存一条文本消息
+    user_msg_id = None
+    if isinstance(user_message, str) and user_message.strip():
+        user_msg_id = save_message(session_id, "user", user_message.strip())
+
+    logger.info(
+        "文件上传成功: session=%s, file=%s, size=%d, chars=%d",
+        session_id, filename, file_size, len(extracted_text),
+    )
+
+    preview = extracted_text[:500] + ("..." if len(extracted_text) > 500 else "")
+
+    return JSONResponse({
+        "success": True,
+        "message": "文件上传成功",
+        "file_msg_id": msg_id,
+        "user_msg_id": user_msg_id,
+        "filename": filename,
+        "file_size": file_size,
+        "file_type": file_type_label,
+        "char_count": len(extracted_text),
+        "preview": preview,
+    })
+
+
 async def api_download_file(request: Request):
     """GET /api/chat/sessions/{id}/files/{filename} — 下载会话导出文件（PDF/Word/PPT）"""
     from urllib.parse import quote
@@ -375,6 +617,12 @@ routes = [
     Route("/api/chat/sessions/{id}", api_session_handler, methods=["GET", "DELETE"]),
     Route("/api/chat/sessions/{id}/messages", api_send_message, methods=["POST"]),
     Route("/api/chat/sessions/{id}/confirm", api_confirm_outline, methods=["POST"]),
+    Route("/api/chat/sessions/{id}/upload", api_upload_file, methods=["POST"]),
+    Route("/api/chat/sessions/{id}/stage", api_update_session_stage, methods=["POST"]),
+    Route("/api/chat/sessions/{id}/stage_summaries", api_get_stage_summaries, methods=["GET"]),
+    Route("/api/chat/sessions/{id}/advance_stage", api_advance_stage, methods=["POST"]),
+    Route("/api/chat/sessions/{id}/export_stage", api_export_stage, methods=["POST"]),
+    Route("/api/chat/sessions/{id}/rename", api_rename_session, methods=["PUT"]),
     Route("/api/chat/sessions/{id}/export", api_export_selected, methods=["POST"]),
     Route("/api/chat/sessions/{id}/files/{filename:path}", api_download_file, methods=["GET"]),
 ]

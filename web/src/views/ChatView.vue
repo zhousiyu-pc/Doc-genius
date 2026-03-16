@@ -4,9 +4,17 @@
     <aside class="chat-sidebar">
       <div class="sidebar-header">
         <h2 class="sidebar-title">AI 需求分析</h2>
-        <el-button type="primary" size="small" @click="handleNewChat">
-          + 新对话
-        </el-button>
+        <el-dropdown trigger="click" @command="handleNewChatWithMode">
+          <el-button type="primary" size="small">
+            + 新对话 <el-icon class="el-icon--right"><arrow-down /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="free">自由对话模式</el-dropdown-item>
+              <el-dropdown-item command="agile">敏捷工程模式</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
       <div class="session-list">
         <div
@@ -16,17 +24,48 @@
           :class="{ active: chatStore.currentSessionId === session.id }"
           @click="handleSwitchSession(session.id)"
         >
-          <div class="session-title">{{ session.title || '新对话' }}</div>
+          <!-- 会话标题：双击进入编辑模式 -->
+          <div v-if="renamingSessionId === session.id" class="session-title-edit" @click.stop>
+            <input
+              ref="renameInputRef"
+              v-model="renameText"
+              class="rename-input"
+              maxlength="100"
+              @keydown.enter="confirmRename(session.id)"
+              @keydown.escape="cancelRename"
+              @blur="confirmRename(session.id)"
+            />
+          </div>
+          <div
+            v-else
+            class="session-title"
+            @dblclick.stop="startRename(session.id, session.title)"
+          >
+            {{ session.title || '新对话' }}
+          </div>
           <div class="session-meta">
+            <span class="session-mode-badge" :class="session.mode" v-if="session.mode === 'agile'">
+              敏捷
+            </span>
             <span class="session-status" :class="session.status">
               {{ statusLabel(session.status) }}
             </span>
-            <el-icon
-              class="session-delete"
-              @click.stop="handleDeleteSession(session.id)"
-            >
-              <Delete />
-            </el-icon>
+            <div class="session-actions">
+              <el-icon
+                class="session-action-icon session-edit"
+                @click.stop="startRename(session.id, session.title)"
+                title="重命名"
+              >
+                <Edit />
+              </el-icon>
+              <el-icon
+                class="session-action-icon session-delete"
+                @click.stop="handleDeleteSession(session.id)"
+                title="删除"
+              >
+                <Delete />
+              </el-icon>
+            </div>
           </div>
         </div>
         <div v-if="chatStore.sessions.length === 0" class="empty-sessions">
@@ -46,11 +85,25 @@
         <div class="welcome-content">
           <h1 class="welcome-title">AI 需求与详设生成器</h1>
           <p class="welcome-desc">
-            通过自然对话，AI 帮你精准梳理需求，自动生成需求文档、流程图、ER 图、测试用例和 API 文档
+            专业的技术产品专家，助力你的想法落地为可开发的逻辑
           </p>
-          <el-button type="primary" size="large" @click="handleNewChat">
-            开始新对话
-          </el-button>
+          
+          <div class="mode-selector-wrap">
+            <div class="mode-card free" @click="handleNewChatWithMode('free')">
+              <div class="mode-icon"><Compass /></div>
+              <h3 class="mode-name">自由对话模式</h3>
+              <p class="mode-intro">头脑风暴，零散记录，随时捕捉灵感，AI 实时辅助补充。</p>
+              <el-button type="primary" link>点击进入 ></el-button>
+            </div>
+            
+            <div class="mode-card agile" @click="handleNewChatWithMode('agile')">
+              <div class="mode-icon"><Checked /></div>
+              <h3 class="mode-name">敏捷工程模式</h3>
+              <p class="mode-intro">严格遵循软件工程规范，从用户故事到数据库设计，步步为营。</p>
+              <el-button type="success" link>点击进入 ></el-button>
+            </div>
+          </div>
+
           <div class="welcome-examples">
             <p class="examples-title">试试这些：</p>
             <div class="example-chips">
@@ -69,6 +122,72 @@
 
       <!-- 聊天消息区域 -->
       <div v-else class="chat-container">
+        <!-- 敏捷模式进度轴 -->
+        <div v-if="chatStore.currentSession?.mode === 'agile'" class="agile-stepper">
+          <div
+            v-for="(stage, idx) in AGILE_STAGES"
+            :key="stage.id"
+            class="stage-node"
+            :class="[getStageStatus(idx), { active: chatStore.currentSession?.current_stage === stage.id }]"
+            @click="handleStageClick(stage.id)"
+          >
+            <div class="stage-icon-wrap">
+              <el-icon><component :is="stage.icon" /></el-icon>
+              <div class="stage-check" v-if="getStageStatus(idx) === 'success'">
+                <el-icon><CircleCheckFilled /></el-icon>
+              </div>
+            </div>
+            <span class="stage-label">{{ stage.label }}</span>
+            <div class="stage-line" v-if="idx < AGILE_STAGES.length - 1"></div>
+          </div>
+        </div>
+
+        <!-- 敏捷模式：环节大纲面板（可折叠，支持查看详情与生成附件） -->
+        <div v-if="chatStore.currentSession?.mode === 'agile' && chatStore.stageSummaries.length > 0" class="stage-outline-panel">
+          <div class="stage-outline-header" @click="stageOutlineCollapsed = !stageOutlineCollapsed">
+            <el-icon class="stage-outline-toggle" :class="{ collapsed: stageOutlineCollapsed }">
+              <ArrowDown />
+            </el-icon>
+            <span class="stage-outline-title">环节大纲</span>
+            <span class="stage-outline-count">{{ chatStore.stageSummaries.length }} 个环节已完成</span>
+          </div>
+          <div v-show="!stageOutlineCollapsed" class="stage-outline-body">
+            <div
+              v-for="s in chatStore.stageSummaries"
+              :key="s.stage"
+              class="stage-outline-item"
+            >
+              <div class="stage-outline-item-header">
+                <el-tag size="small" type="success">{{ s.label }}</el-tag>
+                <span class="stage-outline-item-title">{{ s.title }}</span>
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  @click="toggleStageDetail(s.stage)"
+                >
+                  {{ expandedStageId === s.stage ? '收起' : '查看详情' }}
+                </el-button>
+                <div class="stage-outline-export">
+                  <el-dropdown trigger="click" @command="(fmt: string) => handleExportStage(s.stage, fmt)">
+                    <el-button size="small" type="primary" plain>
+                      生成附件 <el-icon><ArrowDown /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item command="docx">Word</el-dropdown-item>
+                        <el-dropdown-item command="pdf">PDF</el-dropdown-item>
+                        <el-dropdown-item command="pptx">PPT</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                </div>
+              </div>
+              <div v-show="expandedStageId === s.stage" class="stage-outline-item-body markdown-body" v-html="renderMarkdown(s.content)"></div>
+            </div>
+          </div>
+        </div>
+
         <div class="messages-area" ref="messagesArea">
           <div
             v-for="msg in chatStore.messages"
@@ -77,7 +196,24 @@
             :class="msg.role"
           >
             <!-- 用户消息 -->
-            <div v-if="msg.role === 'user'" class="message-bubble user-bubble">
+            <div v-if="msg.role === 'user' && msg.msg_type === 'file'" class="message-bubble user-bubble">
+              <div class="file-bubble">
+                <div class="file-bubble-icon">
+                  <el-icon :size="24"><Document /></el-icon>
+                </div>
+                <div class="file-bubble-info">
+                  <div class="file-bubble-name">{{ (msg.metadata as any)?.filename || '文件' }}</div>
+                  <div class="file-bubble-meta">
+                    <span>{{ (msg.metadata as any)?.file_type || '文件' }}</span>
+                    <span class="file-meta-sep">·</span>
+                    <span>{{ formatFileSize((msg.metadata as any)?.file_size) }}</span>
+                    <span class="file-meta-sep">·</span>
+                    <span>{{ (msg.metadata as any)?.char_count?.toLocaleString() }} 字符</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="msg.role === 'user'" class="message-bubble user-bubble">
               <div class="bubble-content">{{ msg.content }}</div>
             </div>
 
@@ -281,6 +417,40 @@
             >
               <span>{{ msg.content }}</span>
             </div>
+
+            <!-- 敏捷里程碑消息 -->
+            <div
+              v-else-if="msg.msg_type === 'milestone'"
+              class="message-bubble assistant-bubble milestone-bubble"
+            >
+              <div class="bubble-avatar">成果</div>
+              <div class="milestone-card">
+                <div class="milestone-header">
+                  <el-icon><CircleCheckFilled /></el-icon>
+                  <span class="milestone-title">{{ (msg.metadata as any)?.title || '阶段性成果' }}</span>
+                  <el-tag size="small" type="success" effect="dark">
+                    {{ AGILE_STAGES.find(s => s.id === (msg.metadata as any)?.stage)?.label || '已完成' }}
+                  </el-tag>
+                </div>
+                <div class="milestone-body markdown-body" v-html="renderMarkdown(msg.content)"></div>
+                <div class="milestone-footer">
+                  <span class="milestone-tip">此内容已纳入项目上下文，你可以基于此继续完善</span>
+                  <div class="milestone-actions">
+                    <el-button size="small" @click="copyContent(msg.content)">复制内容</el-button>
+                    <el-dropdown v-if="(msg.metadata as any)?.stage" trigger="click" @command="(fmt: string) => handleExportStage((msg.metadata as any).stage, fmt)">
+                      <el-button size="small" type="primary" plain>生成附件</el-button>
+                      <template #dropdown>
+                        <el-dropdown-menu>
+                          <el-dropdown-item command="docx">Word</el-dropdown-item>
+                          <el-dropdown-item command="pdf">PDF</el-dropdown-item>
+                          <el-dropdown-item command="pptx">PPT</el-dropdown-item>
+                        </el-dropdown-menu>
+                      </template>
+                    </el-dropdown>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- 流式打字指示器 -->
@@ -289,6 +459,37 @@
             <div class="typing-dots">
               <span></span><span></span><span></span>
             </div>
+          </div>
+        </div>
+
+        <!-- 敏捷模式：环节完成确认卡片（AI 询问是否进入下一环节时显示） -->
+        <div v-if="chatStore.stageReady && chatStore.currentSession?.mode === 'agile'" class="stage-confirm-bar">
+          <div class="stage-confirm-content">
+            <el-icon class="stage-confirm-icon"><CircleCheckFilled /></el-icon>
+            <div class="stage-confirm-text">
+              <span class="stage-confirm-title">本环节内容已足够</span>
+              <span class="stage-confirm-desc">是否进入下一环节？如需生成本环节附件，可点击下方按钮。</span>
+            </div>
+          </div>
+          <div class="stage-confirm-actions">
+            <el-button
+              v-if="!isLastStage"
+              type="primary"
+              @click="handleAdvanceStage()"
+            >
+              进入下一环节
+            </el-button>
+            <el-button plain @click="chatStore.clearStageReady()">继续完善</el-button>
+            <el-dropdown v-if="chatStore.stageReady" trigger="click" @command="(fmt: string) => handleExportStage(chatStore.stageReady!.stage, fmt)">
+              <el-button type="success" plain>生成本环节附件</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="docx">Word</el-dropdown-item>
+                  <el-dropdown-item command="pdf">PDF</el-dropdown-item>
+                  <el-dropdown-item command="pptx">PPT</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
 
@@ -335,13 +536,46 @@
 
         <!-- 底部输入区域 -->
         <div v-else class="input-area">
+          <!-- 文件待上传预览栏 -->
+          <div v-if="pendingFile" class="file-pending-bar">
+            <div class="file-pending-info">
+              <el-icon :size="18" color="#409eff"><Document /></el-icon>
+              <span class="file-pending-name">{{ pendingFile.name }}</span>
+              <span class="file-pending-size">{{ formatFileSize(pendingFile.size) }}</span>
+            </div>
+            <el-button
+              :icon="Close"
+              circle
+              size="small"
+              class="file-pending-close"
+              @click="clearPendingFile"
+            />
+          </div>
           <div class="input-wrapper">
+            <!-- 隐藏的文件输入 -->
+            <input
+              ref="fileInputRef"
+              type="file"
+              class="hidden-file-input"
+              accept=".txt,.md,.csv,.json,.xml,.yaml,.yml,.docx,.pdf,.html,.py,.java,.js,.ts,.sql,.log"
+              @change="handleFileSelected"
+            />
+            <!-- 文件上传按钮 -->
+            <el-button
+              circle
+              class="upload-btn"
+              :disabled="chatStore.streaming || chatStore.isGenerating || chatStore.uploading"
+              :loading="chatStore.uploading"
+              @click="triggerFileInput"
+            >
+              <el-icon v-if="!chatStore.uploading"><Paperclip /></el-icon>
+            </el-button>
             <el-input
               v-model="inputText"
               type="textarea"
               :rows="1"
               :autosize="{ minRows: 1, maxRows: 6 }"
-              placeholder="描述你想做的产品，或回答 AI 的问题..."
+              :placeholder="pendingFile ? '输入对文件的说明或指令（如：帮我补充完善）...' : '描述你想做的产品，或回答 AI 的问题...'"
               @keydown.enter.exact.prevent="handleSend"
               :disabled="chatStore.streaming || chatStore.isGenerating"
             />
@@ -351,7 +585,7 @@
               type="primary"
               circle
               class="send-btn"
-              :disabled="!inputText.trim()"
+              :disabled="!inputText.trim() && !pendingFile"
               @click="handleSend"
             >
               <el-icon><Promotion /></el-icon>
@@ -367,7 +601,7 @@
             </el-button>
           </div>
           <div class="input-hint">
-            {{ chatStore.streaming ? '点击红色按钮停止生成' : '按 Enter 发送，Shift+Enter 换行' }}
+            {{ chatStore.streaming ? '点击红色按钮停止生成' : chatStore.uploading ? '文件上传中...' : '按 Enter 发送，Shift+Enter 换行 | 点击回形针上传文件' }}
           </div>
         </div>
       </div>
@@ -380,11 +614,13 @@
  * ChatView — 全屏对话式需求分析界面
  * 左侧会话列表 + 右侧 ChatGPT 风格的聊天主区域。
  */
-import { ref, onMounted, nextTick, watch, onUnmounted } from 'vue'
+import { ref, computed, onMounted, nextTick, watch, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Delete, Loading, CircleCheckFilled, Document, Promotion, VideoPause
+  Delete, Loading, CircleCheckFilled, Document, Promotion, VideoPause,
+  UploadFilled, Close, Paperclip, Compass, Checked, Monitor, Cpu, DataLine, List,
+  ArrowDown, Edit, Check,
 } from '@element-plus/icons-vue'
 import mermaid from 'mermaid'
 import { useChatStore } from '@/stores/chat'
@@ -416,6 +652,60 @@ watch(() => docConfigs.value.proposal_ppt.selected, (val) => {
 
 // 消息选择模式下的导出格式
 const selectedExportFormat = ref('docx')
+
+// 文件上传相关状态
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const pendingFile = ref<File | null>(null)
+
+// 会话重命名相关状态
+const renamingSessionId = ref<string | null>(null)
+const renameText = ref('')
+const renameInputRef = ref<HTMLInputElement | null>(null)
+
+// 敏捷模式：环节大纲面板折叠、详情展开
+const stageOutlineCollapsed = ref(false)
+const expandedStageId = ref<string | null>(null)
+
+/** 敏捷工作流阶段定义（7 个节点，覆盖从想法到交付的完整链路） */
+const AGILE_STAGES = [
+  { id: 'discovery', label: '需求洞察', icon: Compass },
+  { id: 'business_case', label: '立项论证', icon: DataLine },
+  { id: 'product_backlog', label: '产品规划', icon: List },
+  { id: 'architecture', label: '架构设计', icon: Cpu },
+  { id: 'ux_prototype', label: '交互原型', icon: Monitor },
+  { id: 'delivery_plan', label: '交付计划', icon: Checked },
+  { id: 'review', label: '评审输出', icon: Document },
+]
+
+/** 计算当前阶段的索引 */
+const currentStageIndex = computed(() => {
+  const stageId = chatStore.currentSession?.current_stage
+  return AGILE_STAGES.findIndex(s => s.id === stageId)
+})
+
+/** 是否为最后一环节（评审输出） */
+const isLastStage = computed(() => {
+  return currentStageIndex.value >= 0 && currentStageIndex.value >= AGILE_STAGES.length - 1
+})
+
+/** 获取阶段状态 */
+const getStageStatus = (index: number) => {
+  if (index < currentStageIndex.value) return 'success'
+  if (index === currentStageIndex.value) return 'process'
+  return 'wait'
+}
+
+/** 手动点击进度轴切换阶段 */
+const handleStageClick = async (stageId: string) => {
+  if (!chatStore.currentSessionId) return
+  try {
+    await ElMessageBox.confirm(`确定要切换到"${AGILE_STAGES.find(s => s.id === stageId)?.label}"阶段吗？`, '切换阶段', {
+      type: 'info'
+    })
+    await chatStore.updateStage(chatStore.currentSessionId, stageId)
+    ElMessage.success('阶段已切换')
+  } catch { /* 取消 */ }
+}
 
 const quickExamples = [
   '帮我做一个保险公司的智能培训系统',
@@ -622,7 +912,12 @@ function statusLabel(status: string): string {
 
 /** 创建新对话 */
 async function handleNewChat() {
-  const sessionId = await chatStore.createSession()
+  await handleNewChatWithMode('free')
+}
+
+/** 创建指定模式的新对话 */
+async function handleNewChatWithMode(mode: string) {
+  const sessionId = await chatStore.createSession('', mode)
   if (sessionId) {
     await chatStore.switchSession(sessionId)
     router.replace({ name: 'chatSession', params: { sessionId } })
@@ -631,7 +926,7 @@ async function handleNewChat() {
 
 /** 快捷示例：创建新对话并发送 */
 async function handleQuickStart(example: string) {
-  const sessionId = await chatStore.createSession()
+  const sessionId = await chatStore.createSession('', 'free')
   if (sessionId) {
     await chatStore.switchSession(sessionId)
     router.replace({ name: 'chatSession', params: { sessionId } })
@@ -661,11 +956,96 @@ async function handleDeleteSession(sessionId: string) {
   } catch { /* 用户取消 */ }
 }
 
-/** 发送消息 */
+/** 进入重命名模式 */
+function startRename(sessionId: string, currentTitle: string) {
+  renamingSessionId.value = sessionId
+  renameText.value = currentTitle || ''
+  nextTick(() => {
+    const input = renameInputRef.value
+    if (input) {
+      if (Array.isArray(input)) {
+        (input[0] as HTMLInputElement)?.focus()
+      } else {
+        input.focus()
+      }
+    }
+  })
+}
+
+/** 确认重命名 */
+async function confirmRename(sessionId: string) {
+  const newTitle = renameText.value.trim()
+  if (!newTitle) {
+    cancelRename()
+    return
+  }
+  const ok = await chatStore.renameSession(sessionId, newTitle)
+  if (ok) {
+    ElMessage.success('已重命名')
+  }
+  renamingSessionId.value = null
+  renameText.value = ''
+}
+
+/** 取消重命名 */
+function cancelRename() {
+  renamingSessionId.value = null
+  renameText.value = ''
+}
+
+/** 切换环节详情展开/收起 */
+function toggleStageDetail(stageId: string) {
+  expandedStageId.value = expandedStageId.value === stageId ? null : stageId
+}
+
+/** 按环节生成附件 */
+async function handleExportStage(stageId: string, format: string) {
+  if (!chatStore.currentSessionId) return
+  const ok = await chatStore.exportStage(chatStore.currentSessionId, stageId, format)
+  if (ok) {
+    ElMessage.success(`已启动导出，请稍候...`)
+  } else {
+    ElMessage.error('导出失败，请重试')
+  }
+}
+
+/** 用户确认进入下一环节 */
+async function handleAdvanceStage() {
+  if (!chatStore.currentSessionId) return
+  const ok = await chatStore.advanceStage(chatStore.currentSessionId)
+  if (ok) {
+    ElMessage.success('已进入下一环节')
+  } else {
+    ElMessage.error('切换失败，可能已是最后一环节')
+  }
+}
+
+/** 发送消息（支持纯文本或文件 + 文本混合发送） */
 async function handleSend() {
   const text = inputText.value.trim()
-  if (!text || chatStore.streaming) return
+  const file = pendingFile.value
+
+  if (!text && !file) return
+  if (chatStore.streaming) return
+
   inputText.value = ''
+
+  if (file) {
+    pendingFile.value = null
+    // 上传文件时不附带文字（文字单独通过 sendMessage 发送，避免重复保存）
+    const result = await chatStore.uploadFile(file)
+    if (!result) {
+      ElMessage.error('文件上传失败，请重试')
+      return
+    }
+    ElMessage.success(`文件"${result.filename}"已上传`)
+
+    // 上传完成后发送用户指令给 LLM（文件内容已在对话上下文中）
+    const instruction = text || '请帮我分析和完善这个文件的内容'
+    await chatStore.sendMessage(instruction)
+    return
+  }
+
   await chatStore.sendMessage(text)
 }
 
@@ -688,6 +1068,34 @@ async function handleExportSelected() {
   } else {
     ElMessage.error('导出失败，请重试')
   }
+}
+
+/** 触发隐藏的文件输入元素 */
+function triggerFileInput() {
+  fileInputRef.value?.click()
+}
+
+/** 用户选择文件后的处理 */
+function handleFileSelected(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) {
+    pendingFile.value = file
+  }
+  input.value = ''
+}
+
+/** 清除待上传的文件 */
+function clearPendingFile() {
+  pendingFile.value = null
+}
+
+/** 格式化文件大小为易读字符串 */
+function formatFileSize(bytes: number | undefined): string {
+  if (!bytes) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 /** 确认大纲，传入按文档类型配置的导出格式 */
@@ -878,6 +1286,7 @@ function downloadArtifact(msg: ChatMessage) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 4px;
 }
 
 .session-status {
@@ -890,20 +1299,61 @@ function downloadArtifact(msg: ChatMessage) {
 .session-status.generating { color: #f56c6c; }
 .session-status.completed { color: #67c23a; }
 
-.session-delete {
+.session-mode-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.session-mode-badge.agile {
+  background: #f0f9eb;
+  color: #67c23a;
+  border: 1px solid #e1f3d8;
+}
+
+.session-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.session-action-icon {
   font-size: 14px;
   color: #ccc;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: all 0.2s;
 }
 
-.session-item:hover .session-delete {
+.session-item:hover .session-action-icon {
   opacity: 1;
+}
+
+.session-edit:hover {
+  color: #409eff;
 }
 
 .session-delete:hover {
   color: #f56c6c;
+}
+
+/* ── 重命名输入框 ──────────────────────────── */
+.session-title-edit {
+  margin-bottom: 4px;
+}
+
+.rename-input {
+  width: 100%;
+  font-size: 13px;
+  color: #333;
+  padding: 3px 6px;
+  border: 1px solid #409eff;
+  border-radius: 4px;
+  outline: none;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.15);
 }
 
 .empty-sessions {
@@ -1443,6 +1893,472 @@ function downloadArtifact(msg: ChatMessage) {
   line-height: 1.5;
   color: #303133;
   white-space: pre;
+}
+
+/* ── 文件上传相关 ──────────────────────────── */
+
+.hidden-file-input {
+  display: none;
+}
+
+.upload-btn {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #dcdfe6;
+  color: #606266;
+  transition: all 0.2s;
+}
+
+.upload-btn:hover:not(:disabled) {
+  color: #409eff;
+  border-color: #409eff;
+  background: #f0f7ff;
+}
+
+.file-pending-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 800px;
+  margin: 0 auto 8px;
+  padding: 8px 12px;
+  background: #f0f7ff;
+  border: 1px solid #d4e5ff;
+  border-radius: 10px;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.file-pending-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.file-pending-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #303133;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+
+.file-pending-size {
+  font-size: 12px;
+  color: #909399;
+  flex-shrink: 0;
+}
+
+.file-pending-close {
+  flex-shrink: 0;
+  border: none !important;
+  background: transparent !important;
+  color: #909399 !important;
+}
+
+.file-pending-close:hover {
+  color: #f56c6c !important;
+}
+
+/* ── 文件消息气泡 ──────────────────────────── */
+
+.file-bubble {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #409eff, #337ecc);
+  border-radius: 16px 16px 4px 16px;
+  color: #fff;
+  min-width: 200px;
+  max-width: 360px;
+}
+
+.file-bubble-icon {
+  width: 44px;
+  height: 44px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.file-bubble-info {
+  min-width: 0;
+}
+
+.file-bubble-name {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.file-bubble-meta {
+  font-size: 12px;
+  opacity: 0.85;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.file-meta-sep {
+  margin: 0 2px;
+}
+
+/* ── 敏捷进度轴 ────────────────────────────── */
+.agile-stepper {
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 24px;
+  background: #fff;
+  border-bottom: 1px solid #e8ecf1;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.stage-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  flex: 1;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.stage-icon-wrap {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #f5f7fa;
+  border: 2px solid #e4e7ed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #909399;
+  font-size: 18px;
+  margin-bottom: 6px;
+  position: relative;
+  transition: all 0.3s;
+}
+
+.stage-node.active .stage-icon-wrap {
+  background: #ecf5ff;
+  border-color: #409eff;
+  color: #409eff;
+  box-shadow: 0 0 0 4px rgba(64, 158, 255, 0.1);
+}
+
+.stage-node.success .stage-icon-wrap {
+  background: #f0f9eb;
+  border-color: #67c23a;
+  color: #67c23a;
+}
+
+.stage-check {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  color: #67c23a;
+  background: #fff;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.stage-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #606266;
+  white-space: nowrap;
+}
+
+.stage-node.active .stage-label {
+  color: #409eff;
+  font-weight: 600;
+}
+
+.stage-line {
+  position: absolute;
+  top: 18px;
+  left: calc(50% + 24px);
+  right: calc(-50% + 24px);
+  height: 2px;
+  background: #e4e7ed;
+  z-index: -1;
+}
+
+.stage-node.success .stage-line {
+  background: #67c23a;
+}
+
+/* ── 模式选择卡片 ──────────────────────────── */
+.mode-selector-wrap {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  margin: 32px 0;
+}
+
+.mode-card {
+  flex: 1;
+  max-width: 240px;
+  padding: 24px;
+  background: #fff;
+  border: 1px solid #e8ecf1;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  text-align: left;
+}
+
+.mode-card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
+}
+
+.mode-card.free:hover { border-color: #409eff; }
+.mode-card.agile:hover { border-color: #67c23a; }
+
+.mode-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  margin-bottom: 16px;
+}
+
+.free .mode-icon { background: #ecf5ff; color: #409eff; }
+.agile .mode-icon { background: #f0f9eb; color: #67c23a; }
+
+.mode-name {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  color: #1a1a2e;
+}
+
+.mode-intro {
+  font-size: 13px;
+  color: #666;
+  line-height: 1.5;
+  margin-bottom: 16px;
+  min-height: 60px;
+}
+
+/* ── 环节大纲面板 ────────────────────────── */
+.stage-outline-panel {
+  background: #f8fafc;
+  border-bottom: 1px solid #e8ecf1;
+  margin: 0 24px;
+  border-radius: 0 0 12px 12px;
+}
+
+.stage-outline-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.stage-outline-toggle {
+  font-size: 14px;
+  color: #909399;
+  transition: transform 0.2s;
+}
+
+.stage-outline-toggle.collapsed {
+  transform: rotate(-90deg);
+}
+
+.stage-outline-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.stage-outline-count {
+  font-size: 12px;
+  color: #909399;
+  margin-left: auto;
+}
+
+.stage-outline-body {
+  padding: 0 16px 16px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.stage-outline-item {
+  background: #fff;
+  border: 1px solid #e8ecf1;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.stage-outline-item:last-child {
+  margin-bottom: 0;
+}
+
+.stage-outline-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  flex-wrap: wrap;
+}
+
+.stage-outline-item-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: #303133;
+  min-width: 0;
+}
+
+.stage-outline-export {
+  margin-left: auto;
+}
+
+.stage-outline-item-body {
+  padding: 12px 14px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* ── 环节完成确认卡片 ────────────────────── */
+.stage-confirm-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  background: linear-gradient(135deg, #f0f9eb 0%, #e8f5e9 100%);
+  border-top: 1px solid #e1f3d8;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.stage-confirm-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.stage-confirm-icon {
+  font-size: 24px;
+  color: #67c23a;
+  flex-shrink: 0;
+}
+
+.stage-confirm-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stage-confirm-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.stage-confirm-desc {
+  font-size: 13px;
+  color: #606266;
+}
+
+.stage-confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* ── 里程碑卡片 ──────────────────────────── */
+.milestone-bubble {
+  max-width: 90%;
+}
+
+.milestone-card {
+  background: #fff;
+  border: 1px solid #e1f3d8;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(103, 194, 58, 0.05);
+}
+
+.milestone-header {
+  padding: 12px 16px;
+  background: #f0f9eb;
+  border-bottom: 1px solid #e1f3d8;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.milestone-header .el-icon {
+  color: #67c23a;
+  font-size: 18px;
+}
+
+.milestone-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+  flex: 1;
+}
+
+.milestone-body {
+  padding: 16px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.milestone-footer {
+  padding: 10px 16px;
+  background: #fafafa;
+  border-top: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.milestone-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.milestone-tip {
+  font-size: 12px;
+  color: #909399;
+  font-style: italic;
 }
 
 /* ── 消息选择导出模式 ──────────────────────── */
