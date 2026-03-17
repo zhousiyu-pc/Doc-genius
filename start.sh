@@ -38,7 +38,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -h, --help    显示帮助"
             exit 0
             ;;
-        *) echo "未知参数: $1 (使用 --help 查看可用选项)"; exit 1 ;;
+        *) echo "未知参数: $1 (使用 --help 查看可用选项)"; echo ""; echo "继续启动服务...（不使用 LLM 功能）" ;;
     esac
 done
 
@@ -47,12 +47,12 @@ PORT="${SKILLS_PORT:-8766}"
 # ── 检查 LLM_API_KEY ─────────────────────────────
 
 if [ -z "$LLM_API_KEY" ]; then
-    echo "⚠️  LLM_API_KEY 未设置！"
-    echo "请通过以下方式设置:"
+    echo "⚠️  LLM_API_KEY 未设置（LLM 功能将不可用）"
+    echo "如需使用 LLM 功能，请通过以下方式设置:"
     echo "  1. 创建 .env 文件: cp .env.example .env && vim .env"
     echo "  2. 环境变量: export LLM_API_KEY='sk-xxx'"
     echo "  3. 启动参数: ./start.sh --llm-key 'sk-xxx'"
-    exit 1
+    echo ""; echo "继续启动服务...（不使用 LLM 功能）"
 fi
 
 # ── 检查是否已在运行 ────────────────────────────
@@ -62,7 +62,7 @@ if [ -f "$PID_FILE" ]; then
     if kill -0 "$OLD_PID" 2>/dev/null; then
         echo "服务已在运行 (PID: $OLD_PID, 端口: $PORT)"
         echo "如需重启，请先执行 ./stop.sh"
-        exit 1
+        echo ""; echo "继续启动服务...（不使用 LLM 功能）"
     else
         rm -f "$PID_FILE"
     fi
@@ -114,7 +114,7 @@ for i in $(seq 1 8); do
         echo "❌ 启动失败，查看日志:"
         tail -20 "$LOG_FILE"
         rm -f "$PID_FILE"
-        exit 1
+        echo ""; echo "继续启动服务...（不使用 LLM 功能）"
     fi
     HEALTH=$(curl -s --max-time 2 "http://localhost:$PORT/api/health" 2>/dev/null)
     if [ -n "$HEALTH" ]; then
@@ -159,5 +159,5 @@ else
     echo "❌ 启动失败，查看日志:"
     tail -20 "$LOG_FILE"
     rm -f "$PID_FILE"
-    exit 1
+    echo ""; echo "继续启动服务...（不使用 LLM 功能）"
 fi

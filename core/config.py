@@ -106,10 +106,11 @@ class Config:
     
     @classmethod
     def _validate_api_key(cls, api_key: str) -> None:
-        """验证 API Key 是否配置"""
+        """验证 API Key 是否配置（仅警告，不强制）"""
         if not api_key or api_key.strip() == "":
-            raise ValueError(
-                "LLM_API_KEY 未配置！\n"
+            import logging
+            logging.getLogger("agent_skills.config").warning(
+                "LLM_API_KEY 未配置！LLM 功能将不可用。\n"
                 "请通过以下方式设置:\n"
                 "  1. 环境变量：export LLM_API_KEY='sk-xxx'\n"
                 "  2. .env 文件\n"
