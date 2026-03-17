@@ -3,19 +3,21 @@
 ================
 提供多轮对话式需求分析的 HTTP 接口。
 消息发送接口返回 SSE（Server-Sent Events）流，实现实时推送。
+支持 JWT 认证和用户会话隔离（通过 AUTH_REQUIRED 环境变量控制）。
 """
 
+import os
 import json
 import logging
 import asyncio
 from typing import AsyncGenerator
 
-import os
 from starlette.requests import Request
 from starlette.responses import JSONResponse, FileResponse, StreamingResponse
 from starlette.routing import Route
 
 from skills.export_utils import get_export_dir
+from core.auth import get_user_from_request
 
 from core.conversation import (
     create_session,
@@ -33,16 +35,58 @@ from core.conversation import (
 
 logger = logging.getLogger("agent_skills.conversation.routes")
 
+# 是否强制要求认证（设为 true 后所有对话 API 需要 Bearer token）
+AUTH_REQUIRED = os.environ.get("AUTH_REQUIRED", "false").lower() == "true"
+
+
+def _get_user_id(request: Request) -> str:
+    """
+    从请求中提取 user_id。
+    AUTH_REQUIRED=true 时强制认证；否则返回空字符串（兼容匿名模式）。
+    """
+    user = get_user_from_request(request)
+    if user:
+        return user["user_id"]
+    return ""
+
+
+def _require_auth(request: Request):
+    """
+    认证守卫：AUTH_REQUIRED=true 时检查 token，无效则返回 401。
+    返回 (user_id, error_response)。
+    """
+    user = get_user_from_request(request)
+    if AUTH_REQUIRED and not user:
+        return "", JSONResponse(
+            {"success": False, "message": "请先登录"}, status_code=401
+        )
+    return (user["user_id"] if user else ""), None
+
+
+def _check_session_access(session: dict, user_id: str):
+    """检查用户是否有权访问该会话。"""
+    if not AUTH_REQUIRED or not user_id:
+        return None  # 匿名模式不检查
+    session_owner = session.get("user_id", "")
+    if session_owner and session_owner != user_id:
+        return JSONResponse(
+            {"success": False, "message": "无权访问此会话"}, status_code=403
+        )
+    return None
+
 
 async def api_create_session(request: Request) -> JSONResponse:
     """POST /api/chat/sessions — 创建新对话会话"""
+    user_id, err = _require_auth(request)
+    if err:
+        return err
     try:
         body = await request.json()
     except Exception:
         body = {}
     title = body.get("title", "")
     mode = body.get("mode", "free")
-    session = create_session(title, mode)
+    session = create_session(title, mode, user_id=user_id)
     return JSONResponse({"success": True, **session})
 
 
@@ -171,22 +215,29 @@ async def api_rename_session(request: Request) -> JSONResponse:
 
 async def api_list_sessions(request: Request) -> JSONResponse:
     """GET /api/chat/sessions — 列出所有对话会话（支持 ?q= 搜索）"""
+    user_id = _get_user_id(request)
     query = request.query_params.get("q", "").strip()
     if query:
-        sessions = search_sessions(query)
+        sessions = search_sessions(query, user_id=user_id)
     else:
-        sessions = list_sessions()
+        sessions = list_sessions(user_id=user_id)
     return JSONResponse({"success": True, "sessions": sessions})
 
 
 async def api_get_session(request: Request) -> JSONResponse:
     """GET /api/chat/sessions/{id} — 获取会话详情及消息历史"""
+    user_id, err = _require_auth(request)
+    if err:
+        return err
     session_id = request.path_params["id"]
     session = get_session(session_id)
     if not session:
         return JSONResponse(
             {"success": False, "message": "会话不存在"}, status_code=404
         )
+    access_err = _check_session_access(session, user_id)
+    if access_err:
+        return access_err
     messages = get_messages(session_id)
     # 解析 outline 字段
     outline = None
@@ -481,6 +532,68 @@ async def api_export_selected(request: Request) -> JSONResponse:
     })
 
 
+
+# ── 文件上传安全配置 ──────────────────────────────
+
+# 允许上传的文件扩展名白名单
+ALLOWED_UPLOAD_EXTENSIONS = {
+    ".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml",
+    ".docx", ".pdf", ".html",
+    ".py", ".java", ".js", ".ts", ".sql", ".log",
+}
+
+# 每用户每小时最多上传文件数
+UPLOAD_RATE_LIMIT_PER_HOUR = 20
+
+# 上传频率计数器：key -> (count, window_start)
+import threading as _threading
+import time as _time
+
+_upload_counter_lock = _threading.Lock()
+_upload_counters: dict[str, tuple[int, float]] = {}
+
+
+def _check_upload_rate(key: str) -> bool:
+    """
+    检查上传频率。返回 True 表示允许，False 表示超限。
+    使用滑动窗口：每小时 UPLOAD_RATE_LIMIT_PER_HOUR 次。
+    """
+    now = _time.time()
+    window = 3600  # 1 小时
+
+    with _upload_counter_lock:
+        if key in _upload_counters:
+            count, window_start = _upload_counters[key]
+            if now - window_start > window:
+                # 窗口过期，重置
+                _upload_counters[key] = (1, now)
+                return True
+            if count >= UPLOAD_RATE_LIMIT_PER_HOUR:
+                return False
+            _upload_counters[key] = (count + 1, window_start)
+            return True
+        else:
+            _upload_counters[key] = (1, now)
+            return True
+
+
+def _get_upload_rate_key(request: Request) -> str:
+    """获取上传频率限制的 key（优先 user_id，回退到 IP）。"""
+    user = get_user_from_request(request)
+    if user and user.get("user_id"):
+        return f"user:{user['user_id']}"
+    # 回退到 IP
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return f"ip:{forwarded.split(',')[0].strip()}"
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return f"ip:{real_ip.strip()}"
+    if request.client:
+        return f"ip:{request.client.host}"
+    return "ip:unknown"
+
+
 async def api_upload_file(request: Request) -> JSONResponse:
     """
     POST /api/chat/sessions/{id}/upload — 上传文件并提取文本内容。
@@ -488,6 +601,11 @@ async def api_upload_file(request: Request) -> JSONResponse:
     接受 multipart/form-data 格式的文件上传。
     将文件内容提取为文本，保存为 msg_type='file' 的消息，
     文件文本内容会自动纳入后续 LLM 对话上下文。
+
+    安全限制:
+        - 文件大小：最大 10MB
+        - 扩展名白名单：.txt .md .csv .json .xml .yaml .yml .docx .pdf .html .py .java .js .ts .sql .log
+        - 上传频率：每用户每小时最多 20 个文件
 
     表单字段:
         - file: 上传的文件
@@ -520,6 +638,30 @@ async def api_upload_file(request: Request) -> JSONResponse:
         )
 
     filename = getattr(upload_file, "filename", "unknown")
+
+    # ── 扩展名白名单检查 ──
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        allowed_list = " ".join(sorted(ALLOWED_UPLOAD_EXTENSIONS))
+        return JSONResponse(
+            {
+                "success": False,
+                "message": f"不支持的文件类型 '{ext}'，允许的类型: {allowed_list}",
+            },
+            status_code=400,
+        )
+
+    # ── 上传频率检查 ──
+    rate_key = _get_upload_rate_key(request)
+    if not _check_upload_rate(rate_key):
+        return JSONResponse(
+            {
+                "success": False,
+                "message": f"上传过于频繁，每小时最多上传 {UPLOAD_RATE_LIMIT_PER_HOUR} 个文件",
+            },
+            status_code=400,
+        )
+
     file_bytes = await upload_file.read()
     file_size = len(file_bytes)
 

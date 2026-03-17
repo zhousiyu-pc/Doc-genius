@@ -1,8 +1,16 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+const AUTH_REQUIRED = false  // 与后端 AUTH_REQUIRED 对应，上线时改为 true
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
+      meta: { guest: true },
+    },
     {
       path: '/',
       name: 'chat',
@@ -14,6 +22,31 @@ const router = createRouter({
       component: () => import('@/views/ChatView.vue'),
     },
   ],
+})
+
+// 路由守卫：AUTH_REQUIRED 时未登录跳转到登录页
+router.beforeEach((to, _from, next) => {
+  if (!AUTH_REQUIRED) {
+    next()
+    return
+  }
+
+  const token = localStorage.getItem('doc_genius_token')
+  if (to.meta.guest) {
+    // 已登录用户访问登录页，跳转到首页
+    if (token) {
+      next({ name: 'chat' })
+    } else {
+      next()
+    }
+  } else {
+    // 需要认证的页面
+    if (!token) {
+      next({ name: 'login' })
+    } else {
+      next()
+    }
+  }
 })
 
 export default router

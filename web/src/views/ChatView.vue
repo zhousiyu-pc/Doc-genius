@@ -89,9 +89,16 @@
       </div>
       <!-- 底部信息 -->
       <div class="sidebar-footer">
-        <el-button link size="small" @click="themeStore.toggle()">
-          {{ themeStore.isDark ? '☀️ 浅色' : '🌙 深色' }}
-        </el-button>
+        <div class="footer-row">
+          <el-button link size="small" @click="themeStore.toggle()">
+            {{ themeStore.isDark ? '☀️ 浅色' : '🌙 深色' }}
+          </el-button>
+          <template v-if="authStore.isLoggedIn">
+            <span class="footer-user">{{ authStore.user?.username }}</span>
+            <el-button link size="small" type="danger" @click="handleLogout">退出</el-button>
+          </template>
+          <el-button v-else link size="small" @click="$router.push('/login')">登录</el-button>
+        </div>
         <span class="footer-label">Doc-genius</span>
       </div>
     </aside>
@@ -652,6 +659,7 @@ import {
 } from '@element-plus/icons-vue'
 import mermaid from 'mermaid'
 import { useChatStore } from '@/stores/chat'
+import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
 import type { ChatMessage } from '@/stores/chat'
 import { renderMarkdown } from '@/utils/markdown'
@@ -660,6 +668,7 @@ const route = useRoute()
 const router = useRouter()
 const chatStore = useChatStore()
 const themeStore = useThemeStore()
+const authStore = useAuthStore()
 const inputText = ref('')
 const messagesArea = ref<HTMLElement | null>(null)
 
@@ -894,6 +903,13 @@ async function handleQuickStart(example: string) {
     await nextTick()
     await chatStore.sendMessage(example)
   }
+}
+
+/** 登出 */
+function handleLogout() {
+  authStore.logout()
+  chatStore.reset()
+  router.replace({ name: 'login' })
 }
 
 /** 搜索对话（防抖 300ms） */
@@ -1344,8 +1360,25 @@ function downloadArtifact(msg: ChatMessage) {
 
 .sidebar-footer {
   padding: 12px 16px;
-  border-top: 1px solid #e8ecf1;
+  border-top: 1px solid var(--border-primary);
   text-align: center;
+}
+
+.footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.footer-user {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .footer-label {

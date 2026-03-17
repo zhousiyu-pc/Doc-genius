@@ -32,8 +32,10 @@ from starlette.staticfiles import StaticFiles
 from core.config import HOST, PORT, DATA_DIR, LOG_DIR, LLM_API_KEY, LLM_MODEL, LLM_PROVIDER
 from core.db import init_db
 from core.error_handler import ErrorHandlerMiddleware
+from core.rate_limiter import RateLimitMiddleware
 from core.logger import setup_logging
 from skills.conversation.routes import routes as chat_routes
+from core.auth_routes import auth_routes
 from skills.pipeline import init_pipeline_executor, shutdown_pipeline_executor
 
 
@@ -58,6 +60,7 @@ async def api_health(request: Request) -> JSONResponse:
 
 all_routes = [
     Route("/api/health", api_health, methods=["GET"]),
+    *auth_routes,
     *chat_routes,
 ]
 
@@ -65,9 +68,18 @@ all_routes = [
 
 _web_dist = os.path.join(_project_root, "web", "dist")
 if os.path.isdir(_web_dist):
+    _index_html = os.path.join(_web_dist, "index.html")
+
+    async def _spa_fallback(request: Request):
+        """SPA fallback：非 API 路径返回 index.html，由前端路由处理。"""
+        from starlette.responses import FileResponse as FR
+        return FR(_index_html)
+
     all_routes.append(
-        Mount("/", app=StaticFiles(directory=_web_dist, html=True)),
+        Mount("/assets", app=StaticFiles(directory=os.path.join(_web_dist, "assets"))),
     )
+    # SPA 通配路由（放在最后，兜底所有非 API 路径）
+    all_routes.append(Route("/{path:path}", _spa_fallback, methods=["GET"]))
 
 
 # ── CORS + 错误处理中间件 ─────────────────────────
@@ -86,6 +98,7 @@ middleware = [
 
 app = Starlette(routes=all_routes, middleware=middleware)
 app.add_middleware(ErrorHandlerMiddleware)
+app.add_middleware(RateLimitMiddleware)
 
 
 # ── 服务启动 ──────────────────────────────────────

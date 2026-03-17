@@ -295,13 +295,14 @@ def parse_export_command(text: str) -> tuple[str, Optional[dict]]:
 
 # ── 会话管理 ──────────────────────────────────────────────────────
 
-def create_session(title: str = "", mode: str = "free") -> dict:
+def create_session(title: str = "", mode: str = "free", user_id: str = "") -> dict:
     """
     创建新的对话会话。
 
     Args:
         title: 会话标题（可选，为空时由第一条消息自动设置）
         mode: 对话模式 - 'free'(自由对话) 或 'agile'(敏捷工程)
+        user_id: 用户 ID（认证模式下必填）
     Returns:
         会话字典，包含 id/title/status/mode/current_stage/created_at
     """
@@ -310,9 +311,9 @@ def create_session(title: str = "", mode: str = "free") -> dict:
     initial_stage = "discovery" if mode == "agile" else ""
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO chat_sessions (id, title, status, mode, current_stage, created_at, updated_at) "
-            "VALUES (?, ?, 'active', ?, ?, ?, ?)",
-            (session_id, title, mode, initial_stage, now, now),
+            "INSERT INTO chat_sessions (id, title, status, mode, current_stage, user_id, created_at, updated_at) "
+            "VALUES (?, ?, 'active', ?, ?, ?, ?, ?)",
+            (session_id, title, mode, initial_stage, user_id, now, now),
         )
     return {"id": session_id, "title": title, "status": "active", "mode": mode, "current_stage": initial_stage, "created_at": now}
 
@@ -323,33 +324,41 @@ def get_session(session_id: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
-def list_sessions() -> list[dict]:
+def list_sessions(user_id: str = "") -> list[dict]:
     with get_db() as conn:
-        rows = conn.execute("SELECT * FROM chat_sessions ORDER BY created_at DESC").fetchall()
+        if user_id:
+            rows = conn.execute(
+                "SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY created_at DESC", (user_id,)
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM chat_sessions ORDER BY created_at DESC").fetchall()
     return [dict(r) for r in rows]
 
 
-def search_sessions(query: str, limit: int = 20) -> list[dict]:
+def search_sessions(query: str, limit: int = 20, user_id: str = "") -> list[dict]:
     """
     搜索会话：按标题和消息内容模糊匹配。
-    返回匹配的会话列表（去重），按更新时间倒序。
+    user_id 非空时仅搜索该用户的会话。
     """
     like = f"%{query}%"
     with get_db() as conn:
-        # 标题匹配
-        title_rows = conn.execute(
-            "SELECT * FROM chat_sessions WHERE title LIKE ? ORDER BY updated_at DESC LIMIT ?",
-            (like, limit),
-        ).fetchall()
+        if user_id:
+            title_rows = conn.execute(
+                "SELECT * FROM chat_sessions WHERE title LIKE ? AND user_id = ? ORDER BY updated_at DESC LIMIT ?",
+                (like, user_id, limit),
+            ).fetchall()
+        else:
+            title_rows = conn.execute(
+                "SELECT * FROM chat_sessions WHERE title LIKE ? ORDER BY updated_at DESC LIMIT ?",
+                (like, limit),
+            ).fetchall()
 
-        # 消息内容匹配 → 找到对应的 session_id
         msg_rows = conn.execute(
             "SELECT DISTINCT session_id FROM chat_messages WHERE content LIKE ? LIMIT ?",
             (like, limit * 2),
         ).fetchall()
         msg_sids = {r["session_id"] for r in msg_rows}
 
-        # 合并去重
         seen = set()
         results = []
         for r in title_rows:
@@ -358,10 +367,17 @@ def search_sessions(query: str, limit: int = 20) -> list[dict]:
             results.append(d)
         if msg_sids - seen:
             placeholders = ",".join("?" for _ in (msg_sids - seen))
-            extra = conn.execute(
-                f"SELECT * FROM chat_sessions WHERE id IN ({placeholders}) ORDER BY updated_at DESC",
-                list(msg_sids - seen),
-            ).fetchall()
+            params = list(msg_sids - seen)
+            if user_id:
+                extra = conn.execute(
+                    f"SELECT * FROM chat_sessions WHERE id IN ({placeholders}) AND user_id = ? ORDER BY updated_at DESC",
+                    params + [user_id],
+                ).fetchall()
+            else:
+                extra = conn.execute(
+                    f"SELECT * FROM chat_sessions WHERE id IN ({placeholders}) ORDER BY updated_at DESC",
+                    params,
+                ).fetchall()
             results.extend(dict(r) for r in extra)
 
     return results[:limit]

@@ -38,6 +38,14 @@ def init_db():
     """初始化数据库表结构"""
     conn = sqlite3.connect(DB_PATH)
     conn.executescript("""
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            password_salt TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS tasks (
             id TEXT PRIMARY KEY,
             feature_list TEXT NOT NULL,
@@ -80,6 +88,7 @@ def init_db():
             status TEXT DEFAULT 'active',
             outline TEXT DEFAULT '',
             task_id TEXT DEFAULT '',
+            user_id TEXT DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -100,15 +109,22 @@ def init_db():
             ON chat_messages(session_id);
     """)
 
-    # 兼容旧库：给 chat_sessions 表添加 mode 和 current_stage 列
+    # 兼容旧库：给 chat_sessions 表添加缺失的列
     for alter_sql in [
         "ALTER TABLE chat_sessions ADD COLUMN mode TEXT DEFAULT 'free'",
         "ALTER TABLE chat_sessions ADD COLUMN current_stage TEXT DEFAULT 'discovery'",
+        "ALTER TABLE chat_sessions ADD COLUMN user_id TEXT DEFAULT ''",
     ]:
         try:
             conn.execute(alter_sql)
         except sqlite3.OperationalError:
             pass
+
+    # 在 user_id 列确保存在后再建索引
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)")
+    except sqlite3.OperationalError:
+        pass
 
     conn.commit()
     conn.close()
