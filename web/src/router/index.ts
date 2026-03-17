@@ -18,6 +18,17 @@ const router = createRouter({
       meta: { guest: true },
     },
     {
+      path: '/pricing',
+      name: 'pricing',
+      component: () => import('@/views/PricingView.vue'),
+      meta: { guest: true },
+    },
+    {
+      path: '/admin',
+      name: 'admin',
+      component: () => import('@/views/AdminView.vue'),
+    },
+    {
       path: '/',
       name: 'chat',
       component: () => import('@/views/ChatView.vue'),

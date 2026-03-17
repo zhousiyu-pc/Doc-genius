@@ -100,6 +100,7 @@
           <el-button link size="small" @click="themeStore.toggle()">
             {{ themeStore.isDark ? '☀️ 浅色' : '🌙 深色' }}
           </el-button>
+          <el-button link size="small" @click="$router.push('/pricing')">💎 套餐</el-button>
           <template v-if="authStore.isLoggedIn">
             <span class="footer-user">{{ authStore.user?.username }}</span>
             <el-button link size="small" type="danger" @click="handleLogout">退出</el-button>

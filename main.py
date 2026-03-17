@@ -33,10 +33,13 @@ from core.config import HOST, PORT, DATA_DIR, LOG_DIR, LLM_API_KEY, LLM_MODEL, L
 from core.db import init_db
 from core.error_handler import ErrorHandlerMiddleware
 from core.rate_limiter import RateLimitMiddleware
+from core.quota_middleware import QuotaMiddleware
 from core.logger import setup_logging
 from skills.conversation.routes import routes as chat_routes
 from core.auth_routes import auth_routes
+from core.plan_routes import plan_routes
 from core.share_routes import share_routes
+from core.admin_routes import admin_routes
 from core.template_routes import template_routes
 from core.version_routes import version_routes
 from skills.pipeline import init_pipeline_executor, shutdown_pipeline_executor
@@ -64,6 +67,8 @@ async def api_health(request: Request) -> JSONResponse:
 all_routes = [
     Route("/api/health", api_health, methods=["GET"]),
     *auth_routes,
+    *plan_routes,
+    *admin_routes,
     *share_routes,
     *template_routes,
     *version_routes,
@@ -105,6 +110,7 @@ middleware = [
 app = Starlette(routes=all_routes, middleware=middleware)
 app.add_middleware(ErrorHandlerMiddleware)
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(QuotaMiddleware)
 
 
 # ── 服务启动 ──────────────────────────────────────
@@ -118,6 +124,9 @@ def main():
 
     from core.templates import init_builtin_templates
     init_builtin_templates()
+
+    from core.plans import init_builtin_plans
+    init_builtin_plans()
 
     init_pipeline_executor()
 

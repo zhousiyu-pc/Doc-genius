@@ -175,6 +175,59 @@ def init_db():
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_session_versions_sid ON session_versions(session_id)")
 
+    # 套餐配置表（内置套餐 + 用户自定义）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS plans (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            price_monthly INTEGER DEFAULT 0,
+            price_quarterly INTEGER DEFAULT 0,
+            price_yearly INTEGER DEFAULT 0,
+            daily_chat_limit INTEGER DEFAULT 10,
+            monthly_doc_limit INTEGER DEFAULT 3,
+            max_file_size_mb INTEGER DEFAULT 5,
+            max_versions INTEGER DEFAULT 0,
+            allowed_models TEXT DEFAULT '',
+            features TEXT DEFAULT '',
+            sort_order INTEGER DEFAULT 0,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    # 用户订阅表
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            plan_id TEXT NOT NULL,
+            status TEXT DEFAULT 'active',
+            billing_cycle TEXT DEFAULT 'monthly',
+            started_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            auto_renew INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (plan_id) REFERENCES plans(id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id)")
+
+    # 用量记录表（每日统计）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS usage_records (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            record_date TEXT NOT NULL,
+            chat_count INTEGER DEFAULT 0,
+            doc_count INTEGER DEFAULT 0,
+            upload_count INTEGER DEFAULT 0,
+            UNIQUE(user_id, record_date)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_user_date ON usage_records(user_id, record_date)")
+
     conn.commit()
     conn.close()
     logger.info("数据库初始化完成: %s", DB_PATH)
