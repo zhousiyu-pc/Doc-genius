@@ -8,6 +8,17 @@
 
 import os
 from pathlib import Path
+
+# 加载 .env 文件（如果存在）
+_env_path = Path(__file__).parent.parent / '.env'
+if _env_path.exists():
+    with open(_env_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, value = line.split('=', 1)
+                os.environ.setdefault(key.strip(), value.strip())
+
 from typing import Optional
 from dataclasses import dataclass
 
