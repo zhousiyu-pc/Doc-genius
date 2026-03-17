@@ -3,18 +3,13 @@
     <!-- 左侧会话列表 -->
     <aside class="chat-sidebar" :class="{ 'sidebar-open': sidebarOpen }">
       <div class="sidebar-header">
-        <h2 class="sidebar-title">AI 需求分析</h2>
-        <el-dropdown trigger="click" @command="handleNewChatWithMode">
-          <el-button type="primary" size="small">
-            + 新对话 <el-icon class="el-icon--right"><arrow-down /></el-icon>
-          </el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="free">自由对话模式</el-dropdown-item>
-              <el-dropdown-item command="agile">敏捷工程模式</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <button class="new-chat-btn" @click="handleNewChatWithMode('free')">
+          <el-icon><Plus /></el-icon>
+          <span>新对话</span>
+        </button>
+        <button class="new-chat-mode-btn" @click="handleNewChatWithMode('agile')" title="敏捷工程模式">
+          <el-icon><Checked /></el-icon>
+        </button>
       </div>
       <!-- 搜索框 -->
       <div class="sidebar-search">
@@ -94,20 +89,43 @@
           暂无对话，点击上方按钮开始
         </div>
       </div>
-      <!-- 底部信息 -->
-      <div class="sidebar-footer">
-        <div class="footer-row">
-          <el-button link size="small" @click="themeStore.toggle()">
-            {{ themeStore.isDark ? '☀️ 浅色' : '🌙 深色' }}
-          </el-button>
-          <el-button link size="small" @click="$router.push('/pricing')">💎 套餐</el-button>
-          <template v-if="authStore.isLoggedIn">
-            <span class="footer-user">{{ authStore.user?.username }}</span>
-            <el-button link size="small" type="danger" @click="handleLogout">退出</el-button>
-          </template>
-          <el-button v-else link size="small" @click="$router.push('/login')">登录</el-button>
+      <!-- 底部用户区 GPT 风格 -->
+      <div class="sidebar-user-area" @click="showUserMenu = !showUserMenu">
+        <div class="sidebar-user-info">
+          <div class="user-avatar-circle">
+            {{ authStore.isLoggedIn ? (authStore.user?.username?.[0] || 'U').toUpperCase() : '?' }}
+          </div>
+          <span class="user-display-name">
+            {{ authStore.isLoggedIn ? authStore.user?.username : '未登录' }}
+          </span>
         </div>
-        <span class="footer-label">Doc-genius</span>
+        <el-icon class="user-setting-icon"><Setting /></el-icon>
+        <!-- 上弹菜单 -->
+        <Transition name="user-menu-fade">
+          <div v-if="showUserMenu" class="user-popup-menu" @click.stop>
+            <div class="user-menu-item" @click="$router.push('/pricing'); showUserMenu = false">
+              <span class="user-menu-emoji">💎</span> 我的套餐
+            </div>
+            <div class="user-menu-item" @click="themeStore.toggle(); showUserMenu = false">
+              <span class="user-menu-emoji">{{ themeStore.isDark ? '☀️' : '🌙' }}</span>
+              {{ themeStore.isDark ? '浅色模式' : '深色模式' }}
+            </div>
+            <div class="user-menu-item disabled">
+              <span class="user-menu-emoji">⚙️</span> 设置
+            </div>
+            <div class="user-menu-divider"></div>
+            <template v-if="authStore.isLoggedIn">
+              <div class="user-menu-item danger" @click="handleLogout(); showUserMenu = false">
+                <span class="user-menu-emoji">🚪</span> 退出登录
+              </div>
+            </template>
+            <template v-else>
+              <div class="user-menu-item" @click="$router.push('/login'); showUserMenu = false">
+                <span class="user-menu-emoji">🔑</span> 登录
+              </div>
+            </template>
+          </div>
+        </Transition>
       </div>
     </aside>
 
@@ -126,7 +144,7 @@
       <!-- 未选择会话时的欢迎页 -->
       <div v-if="!chatStore.currentSessionId" class="welcome-screen">
         <div class="welcome-content">
-          <h1 class="welcome-title">AI 需求与详设生成器</h1>
+          <h1 class="welcome-title">Doc-genius</h1>
           <p class="welcome-desc">
             专业的技术产品专家，助力你的想法落地为可开发的逻辑
           </p>
@@ -136,14 +154,12 @@
               <div class="mode-icon"><Compass /></div>
               <h3 class="mode-name">自由对话模式</h3>
               <p class="mode-intro">头脑风暴，零散记录，随时捕捉灵感，AI 实时辅助补充。</p>
-              <el-button type="primary" link>点击进入 ></el-button>
             </div>
             
             <div class="mode-card agile" @click="handleNewChatWithMode('agile')">
               <div class="mode-icon"><Checked /></div>
               <h3 class="mode-name">敏捷工程模式</h3>
               <p class="mode-intro">严格遵循软件工程规范，从用户故事到数据库设计，步步为营。</p>
-              <el-button type="success" link>点击进入 ></el-button>
             </div>
           </div>
 
@@ -240,6 +256,9 @@
           >
             <!-- 用户消息 -->
             <div v-if="msg.role === 'user' && msg.msg_type === 'file'" class="message-bubble user-bubble">
+              <div class="msg-avatar user-avatar-sm">
+                {{ (authStore.user?.username?.[0] || 'U').toUpperCase() }}
+              </div>
               <div class="file-bubble">
                 <div class="file-bubble-icon">
                   <el-icon :size="24"><Document /></el-icon>
@@ -257,6 +276,9 @@
               </div>
             </div>
             <div v-else-if="msg.role === 'user'" class="message-bubble user-bubble">
+              <div class="msg-avatar user-avatar-sm">
+                {{ (authStore.user?.username?.[0] || 'U').toUpperCase() }}
+              </div>
               <div class="bubble-content">{{ msg.content }}</div>
             </div>
 
@@ -272,7 +294,9 @@
                 :model-value="chatStore.selectedMessageIds.has(msg.id)"
                 @change="chatStore.toggleMessageSelection(msg.id)"
               />
-              <div class="bubble-avatar">AI</div>
+              <div class="msg-avatar ai-avatar">
+                <el-icon><Monitor /></el-icon>
+              </div>
               <div class="bubble-content markdown-body" v-html="renderMarkdown(msg.content)"></div>
             </div>
 
@@ -281,7 +305,7 @@
               v-else-if="msg.msg_type === 'outline'"
               class="message-bubble assistant-bubble"
             >
-              <div class="bubble-avatar">AI</div>
+              <div class="msg-avatar ai-avatar"><el-icon><Monitor /></el-icon></div>
               <div class="outline-card">
                 <h3 class="outline-title">
                   {{ (msg.metadata as any)?.project_name || '需求大纲' }}
@@ -419,7 +443,7 @@
               v-else-if="msg.msg_type === 'artifact'"
               class="message-bubble assistant-bubble artifact-bubble"
             >
-              <div class="bubble-avatar">AI</div>
+              <div class="msg-avatar ai-avatar"><el-icon><Monitor /></el-icon></div>
               <div class="artifact-card">
                 <div class="artifact-header">
                   <el-icon><Document /></el-icon>
@@ -466,7 +490,7 @@
               v-else-if="msg.msg_type === 'milestone'"
               class="message-bubble assistant-bubble milestone-bubble"
             >
-              <div class="bubble-avatar">成果</div>
+              <div class="msg-avatar ai-avatar"><el-icon><CircleCheckFilled /></el-icon></div>
               <div class="milestone-card">
                 <div class="milestone-header">
                   <el-icon><CircleCheckFilled /></el-icon>
@@ -498,7 +522,7 @@
 
           <!-- 流式打字指示器 -->
           <div v-if="chatStore.streaming" class="typing-indicator">
-            <div class="bubble-avatar">AI</div>
+            <div class="msg-avatar ai-avatar"><el-icon><Monitor /></el-icon></div>
             <div class="typing-dots">
               <span></span><span></span><span></span>
             </div>
@@ -664,7 +688,7 @@ import axios from 'axios'
 import {
   Delete, Loading, CircleCheckFilled, Document, Promotion, VideoPause,
   Close, Paperclip, Compass, Checked, Monitor, Cpu, DataLine, List,
-  ArrowDown, Edit, Search, Fold, Share,
+  ArrowDown, Edit, Search, Fold, Share, Plus, Setting,
 } from '@element-plus/icons-vue'
 import mermaid from 'mermaid'
 import { useChatStore } from '@/stores/chat'
@@ -687,6 +711,7 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 // 移动端侧栏
 const sidebarOpen = ref(false)
+const showUserMenu = ref(false)
 
 // 每个文档类型的配置状态
 const docConfigs = ref({
@@ -1251,53 +1276,103 @@ function downloadArtifact(msg: ChatMessage) {
 /* ── 左侧会话列表 ────────────────────────── */
 .chat-sidebar {
   width: 260px;
-  background: var(--bg-secondary);
-  border-right: 1px solid var(--border-primary);
+  background: #171717;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
 }
 
 .sidebar-header {
-  padding: 16px;
+  padding: 12px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid #e8ecf1;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
-.sidebar-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #1a1a2e;
-  margin: 0;
+.new-chat-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  color: #ececf1;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.new-chat-btn:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+.new-chat-mode-btn {
+  padding: 10px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  color: #ececf1;
+  cursor: pointer;
+  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+}
+
+.new-chat-mode-btn:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+.sidebar-search {
+  padding: 8px 12px;
+}
+
+.sidebar-search :deep(.el-input__wrapper) {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow: none;
+  border-radius: 8px;
+}
+
+.sidebar-search :deep(.el-input__inner) {
+  color: #ececf1;
+}
+
+.sidebar-search :deep(.el-input__inner::placeholder) {
+  color: rgba(255,255,255,0.35);
+}
+
+.sidebar-search :deep(.el-icon) {
+  color: rgba(255,255,255,0.35);
 }
 
 .session-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: 4px 8px;
 }
 
 .session-item {
   padding: 10px 12px;
   border-radius: 8px;
   cursor: pointer;
-  margin-bottom: 4px;
-  transition: background 0.2s;
+  margin-bottom: 2px;
+  transition: background 0.15s;
 }
 
 .session-item:hover {
-  background: #f0f4ff;
+  background: rgba(255,255,255,0.08);
 }
 
 .session-item.active {
-  background: #e8f0fe;
+  background: rgba(255,255,255,0.12);
 }
 
 .session-title {
   font-size: 13px;
-  color: #333;
+  color: #ececf1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1313,11 +1388,11 @@ function downloadArtifact(msg: ChatMessage) {
 
 .session-status {
   font-size: 11px;
-  color: #999;
+  color: rgba(255,255,255,0.4);
 }
 
-.session-status.active { color: #409eff; }
-.session-status.confirmed { color: #e6a23c; }
+.session-status.active { color: #6ea8fe; }
+.session-status.confirmed { color: #f0ad4e; }
 .session-status.generating { color: #f56c6c; }
 .session-status.completed { color: #67c23a; }
 
@@ -1329,9 +1404,9 @@ function downloadArtifact(msg: ChatMessage) {
 }
 
 .session-mode-badge.agile {
-  background: #f0f9eb;
+  background: rgba(103, 194, 58, 0.15);
   color: #67c23a;
-  border: 1px solid #e1f3d8;
+  border: 1px solid rgba(103, 194, 58, 0.3);
 }
 
 .session-actions {
@@ -1343,10 +1418,10 @@ function downloadArtifact(msg: ChatMessage) {
 
 .session-action-icon {
   font-size: 14px;
-  color: #ccc;
+  color: rgba(255,255,255,0.3);
   cursor: pointer;
   opacity: 0;
-  transition: all 0.2s;
+  transition: all 0.15s;
 }
 
 .session-item:hover .session-action-icon {
@@ -1354,7 +1429,7 @@ function downloadArtifact(msg: ChatMessage) {
 }
 
 .session-edit:hover {
-  color: #409eff;
+  color: #6ea8fe;
 }
 
 .session-share:hover {
@@ -1373,48 +1448,132 @@ function downloadArtifact(msg: ChatMessage) {
 .rename-input {
   width: 100%;
   font-size: 13px;
-  color: #333;
+  color: #ececf1;
   padding: 3px 6px;
-  border: 1px solid #409eff;
+  border: 1px solid rgba(255,255,255,0.2);
   border-radius: 4px;
   outline: none;
-  background: #fff;
-  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.15);
+  background: rgba(255,255,255,0.06);
 }
 
 .empty-sessions {
   text-align: center;
-  color: #999;
+  color: rgba(255,255,255,0.35);
   font-size: 13px;
   padding: 40px 16px;
 }
 
-.sidebar-footer {
-  padding: 12px 16px;
-  border-top: 1px solid var(--border-primary);
-  text-align: center;
+/* ── GPT 风格底部用户区 ────────────────────── */
+.sidebar-user-area {
+  padding: 12px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s;
 }
 
-.footer-row {
+.sidebar-user-area:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.sidebar-user-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.user-avatar-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #10a37f;
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  margin-bottom: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
 }
 
-.footer-user {
-  font-size: 12px;
-  color: var(--text-muted);
-  max-width: 80px;
+.user-display-name {
+  font-size: 14px;
+  color: #ececf1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.footer-label {
-  font-size: 11px;
-  color: #bbb;
+.user-setting-icon {
+  color: rgba(255,255,255,0.5);
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+/* 上弹菜单 */
+.user-popup-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 8px;
+  right: 8px;
+  margin-bottom: 4px;
+  background: #2f2f2f;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  z-index: 100;
+}
+
+.user-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #ececf1;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.user-menu-item:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+.user-menu-item.disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.user-menu-item.danger {
+  color: #f56c6c;
+}
+
+.user-menu-emoji {
+  font-size: 16px;
+  width: 20px;
+  text-align: center;
+}
+
+.user-menu-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.1);
+  margin: 4px 8px;
+}
+
+.user-menu-fade-enter-active,
+.user-menu-fade-leave-active {
+  transition: all 0.15s ease;
+}
+.user-menu-fade-enter-from,
+.user-menu-fade-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
 }
 
 /* ── 右侧主区域 ──────────────────────────── */
@@ -1440,15 +1599,15 @@ function downloadArtifact(msg: ChatMessage) {
 }
 
 .welcome-title {
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
-  color: #1a1a2e;
+  color: var(--text-primary);
   margin-bottom: 12px;
 }
 
 .welcome-desc {
   font-size: 15px;
-  color: #666;
+  color: var(--text-muted);
   line-height: 1.6;
   margin-bottom: 24px;
 }
@@ -1472,19 +1631,19 @@ function downloadArtifact(msg: ChatMessage) {
 
 .example-chip {
   padding: 8px 16px;
-  background: #fff;
-  border: 1px solid #e0e0e0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
   border-radius: 20px;
   font-size: 13px;
-  color: #555;
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .example-chip:hover {
-  border-color: #409eff;
-  color: #409eff;
-  background: #f0f7ff;
+  border-color: #10a37f;
+  color: #10a37f;
+  background: rgba(16, 163, 127, 0.06);
 }
 
 /* ── 聊天容器 ────────────────────────────── */
@@ -1506,6 +1665,9 @@ function downloadArtifact(msg: ChatMessage) {
 .message-row {
   display: flex;
   margin-bottom: 16px;
+  max-width: 768px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .message-row.user {
@@ -1518,24 +1680,50 @@ function downloadArtifact(msg: ChatMessage) {
 }
 
 .message-bubble {
-  max-width: 75%;
+  max-width: 100%;
   display: flex;
-  gap: 10px;
+  gap: 12px;
 }
 
 .user-bubble {
   flex-direction: row-reverse;
 }
 
-.user-bubble .bubble-content {
-  background: #409eff;
+/* GPT 风格头像 */
+.msg-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.user-avatar-sm {
+  background: #5436DA;
   color: #fff;
-  border-radius: 16px 16px 4px 16px;
+  font-size: 12px;
+}
+
+.ai-avatar {
+  background: #10a37f;
+  color: #fff;
+  font-size: 14px;
+}
+
+.user-bubble .bubble-content {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: 18px 18px 4px 18px;
   padding: 10px 16px;
   font-size: 14px;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+  border: 1px solid var(--border-primary);
 }
 
 .bubble-avatar {
@@ -1553,13 +1741,13 @@ function downloadArtifact(msg: ChatMessage) {
 }
 
 .assistant-bubble .bubble-content {
-  background: var(--bg-bubble-ai);
-  border: 1px solid var(--border-primary);
-  border-radius: 4px 16px 16px 16px;
-  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
   font-size: 14px;
   line-height: 1.7;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   word-break: break-word;
 }
 
@@ -1803,44 +1991,74 @@ function downloadArtifact(msg: ChatMessage) {
 
 /* ── 底部输入区域 ────────────────────────── */
 .input-area {
-  padding: 12px 24px 16px;
-  background: var(--bg-secondary);
+  padding: 16px 24px 20px;
+  background: var(--bg-primary);
   border-top: 1px solid var(--border-primary);
 }
 
 .input-wrapper {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
-  max-width: 800px;
+  gap: 12px;
+  max-width: 768px;
   margin: 0 auto;
+  position: relative;
 }
 
 .input-wrapper :deep(.el-textarea__inner) {
-  border-radius: 12px;
-  padding: 10px 16px;
+  border-radius: 14px;
+  padding: 12px 48px 12px 16px;
   font-size: 14px;
   resize: none;
-  border: 1px solid #dcdfe6;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  border: 1px solid var(--border-primary);
+  box-shadow: 0 0 0 0 rgba(0,0,0,0);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  line-height: 1.5;
+  max-height: 200px;
 }
 
 .input-wrapper :deep(.el-textarea__inner:focus) {
-  border-color: #409eff;
-  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.15);
+  border-color: var(--border-primary);
+  box-shadow: 0 0 0 1px var(--border-primary);
+}
+
+.input-wrapper :deep(.el-textarea__inner::placeholder) {
+  color: var(--text-muted);
 }
 
 .send-btn {
+  position: absolute;
+  right: 8px;
+  bottom: 10px;
   flex-shrink: 0;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #10a37f;
+  border: none;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.send-btn:hover {
+  background: #0d8a6a;
+}
+
+.send-btn:disabled {
+  background: var(--border-primary);
+  cursor: not-allowed;
 }
 
 .input-hint {
   text-align: center;
   font-size: 11px;
-  color: #bbb;
-  margin-top: 6px;
+  color: var(--text-muted);
+  margin-top: 8px;
 }
 
 /* ── Markdown 渲染样式 ───────────────────── */
@@ -2162,17 +2380,17 @@ function downloadArtifact(msg: ChatMessage) {
   flex: 1;
   max-width: 240px;
   padding: 24px;
-  background: #fff;
-  border: 1px solid #e8ecf1;
-  border-radius: 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s;
   text-align: left;
 }
 
 .mode-card:hover {
-  transform: translateY(-8px);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
+  border-color: #10a37f;
+  background: rgba(16, 163, 127, 0.04);
 }
 
 .mode-card.free:hover { border-color: #409eff; }
@@ -2189,22 +2407,22 @@ function downloadArtifact(msg: ChatMessage) {
   margin-bottom: 16px;
 }
 
-.free .mode-icon { background: #ecf5ff; color: #409eff; }
-.agile .mode-icon { background: #f0f9eb; color: #67c23a; }
+.free .mode-icon { background: rgba(64, 158, 255, 0.1); color: #409eff; }
+.agile .mode-icon { background: rgba(103, 194, 58, 0.1); color: #67c23a; }
 
 .mode-name {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   margin: 0 0 8px 0;
-  color: #1a1a2e;
+  color: var(--text-primary);
 }
 
 .mode-intro {
   font-size: 13px;
-  color: #666;
+  color: var(--text-muted);
   line-height: 1.5;
-  margin-bottom: 16px;
-  min-height: 60px;
+  margin-bottom: 0;
+  min-height: 56px;
 }
 
 /* ── 环节大纲面板 ────────────────────────── */

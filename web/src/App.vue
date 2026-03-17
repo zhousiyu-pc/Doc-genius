@@ -18,46 +18,46 @@ onMounted(() => {
 </script>
 
 <style>
-/* ── CSS 变量：浅色主题 ────────────────────── */
+/* ── CSS 变量：浅色主题（GPT 风格） ────────────────────── */
 :root, [data-theme="light"] {
-  --bg-primary: #f8fafc;
-  --bg-secondary: #ffffff;
-  --bg-hover: #f0f4ff;
-  --bg-active: #e8f0fe;
+  --bg-primary: #ffffff;
+  --bg-secondary: #f7f7f8;
+  --bg-hover: #f0f0f0;
+  --bg-active: #ececec;
   --bg-input: #ffffff;
-  --bg-bubble-user: #409eff;
-  --bg-bubble-ai: #ffffff;
-  --bg-bubble-system: #f5f5f5;
+  --bg-bubble-user: #ffffff;
+  --bg-bubble-ai: #f7f7f8;
+  --bg-bubble-system: #f7f7f8;
   --bg-code: #f6f8fa;
-  --border-primary: #e8ecf1;
-  --border-light: #f0f0f0;
-  --text-primary: #0f172a;
-  --text-secondary: #333;
-  --text-tertiary: #666;
-  --text-muted: #999;
-  --text-bubble-user: #ffffff;
-  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  --border-primary: #e5e5e5;
+  --border-light: #efefef;
+  --text-primary: #1a1a1a;
+  --text-secondary: #374151;
+  --text-tertiary: #6b7280;
+  --text-muted: #8e8ea0;
+  --text-bubble-user: #1a1a1a;
+  --shadow-card: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
 
-/* ── CSS 变量：深色主题 ────────────────────── */
+/* ── CSS 变量：深色主题（GPT 风格） ────────────────────── */
 [data-theme="dark"] {
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-hover: #334155;
-  --bg-active: #1e3a5f;
-  --bg-input: #1e293b;
-  --bg-bubble-user: #2563eb;
-  --bg-bubble-ai: #1e293b;
-  --bg-bubble-system: #1e293b;
-  --bg-code: #0f172a;
-  --border-primary: #334155;
-  --border-light: #1e293b;
-  --text-primary: #f1f5f9;
-  --text-secondary: #e2e8f0;
-  --text-tertiary: #94a3b8;
-  --text-muted: #64748b;
-  --text-bubble-user: #ffffff;
-  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+  --bg-primary: #343541;
+  --bg-secondary: #444654;
+  --bg-hover: #4e4f60;
+  --bg-active: #565869;
+  --bg-input: #40414f;
+  --bg-bubble-user: #343541;
+  --bg-bubble-ai: #444654;
+  --bg-bubble-system: #444654;
+  --bg-code: #2d2d3a;
+  --border-primary: #4e4f60;
+  --border-light: #444654;
+  --text-primary: #ececf1;
+  --text-secondary: #d1d5db;
+  --text-tertiary: #9ca3af;
+  --text-muted: #8e8ea0;
+  --text-bubble-user: #ececf1;
+  --shadow-card: 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
 * {
