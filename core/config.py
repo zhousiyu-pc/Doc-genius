@@ -25,6 +25,7 @@ LLM_PROVIDER_URLS = {
     "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
     "openai": "https://api.openai.com/v1/chat/completions",
     "deepseek": "https://api.deepseek.com/v1/chat/completions",
+    "anthropic": "https://api.anthropic.com/v1/messages",
 }
 
 

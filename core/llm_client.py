@@ -1,8 +1,11 @@
 """
 LLM 客户端 — 多模型支持
 ========================
-支持 dashscope（通义千问）、openai、deepseek 等 OpenAI 兼容 API，
+支持 dashscope（通义千问）、openai、deepseek、anthropic（Claude）等 API，
 通过配置切换提供商。支持普通调用和 SSE 流式调用两种模式。
+
+OpenAI 兼容提供商（dashscope/openai/deepseek）使用统一的请求格式。
+Anthropic（Claude）使用原生 Messages API 格式。
 """
 
 import json
@@ -201,6 +204,137 @@ def _rate_limit_wait() -> None:
         _last_call_time = time.time()
 
 
+# ── Anthropic (Claude) 适配层 ─────────────────────────────────
+
+def _is_anthropic() -> bool:
+    """当前是否使用 Anthropic 原生 API。"""
+    return LLM_PROVIDER == "anthropic"
+
+
+def _build_anthropic_headers() -> dict:
+    """构建 Anthropic API 请求头。"""
+    return {
+        "Content-Type": "application/json",
+        "x-api-key": LLM_API_KEY,
+        "anthropic-version": "2023-06-01",
+    }
+
+
+def _convert_to_anthropic_payload(
+    messages: list[dict],
+    model: str,
+    temperature: float,
+    stream: bool = False,
+    max_tokens: int = 8192,
+) -> dict:
+    """
+    将 OpenAI 格式的 messages 转换为 Anthropic Messages API 格式。
+
+    Anthropic 要求:
+    - system prompt 单独放在 `system` 字段，不在 messages 数组中
+    - messages 数组只包含 user/assistant 角色
+    - 必须指定 max_tokens
+    """
+    system_text = ""
+    filtered_messages = []
+    for msg in messages:
+        if msg["role"] == "system":
+            system_text += msg["content"] + "\n"
+        else:
+            filtered_messages.append({
+                "role": msg["role"],
+                "content": msg["content"],
+            })
+
+    payload = {
+        "model": model,
+        "messages": filtered_messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    if system_text.strip():
+        payload["system"] = system_text.strip()
+    if stream:
+        payload["stream"] = True
+    return payload
+
+
+def _call_anthropic_chat(
+    messages: list[dict],
+    temperature: float = 0.4,
+    model: str | None = None,
+) -> str:
+    """Anthropic Messages API — 非流式调用。"""
+    use_model = model or LLM_MODEL
+    payload = _convert_to_anthropic_payload(messages, use_model, temperature)
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    _rate_limit_wait()
+
+    req = urllib.request.Request(
+        LLM_API_URL,
+        data=data,
+        headers=_build_anthropic_headers(),
+        method="POST",
+    )
+    logger.info("call_anthropic_chat: model=%s, messages=%d条", use_model, len(messages))
+    resp = urllib.request.urlopen(req, timeout=300, context=_ssl_ctx)
+    result = json.loads(resp.read().decode("utf-8"))
+
+    # Anthropic 响应格式: {"content": [{"type": "text", "text": "..."}], ...}
+    content_blocks = result.get("content", [])
+    text_parts = [b["text"] for b in content_blocks if b.get("type") == "text"]
+    return "".join(text_parts)
+
+
+def _call_anthropic_stream(
+    messages: list[dict],
+    temperature: float = 0.4,
+    model: str | None = None,
+) -> Generator[str, None, None]:
+    """Anthropic Messages API — SSE 流式调用。"""
+    use_model = model or LLM_MODEL
+    payload = _convert_to_anthropic_payload(messages, use_model, temperature, stream=True)
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    _rate_limit_wait()
+
+    req = urllib.request.Request(
+        LLM_API_URL,
+        data=data,
+        headers=_build_anthropic_headers(),
+        method="POST",
+    )
+    logger.info("call_anthropic_stream: model=%s, messages=%d条", use_model, len(messages))
+    resp = urllib.request.urlopen(req, timeout=300, context=_ssl_ctx)
+
+    for raw_line in resp:
+        line = raw_line.decode("utf-8").strip()
+        if not line:
+            continue
+        if line.startswith("data: "):
+            payload_str = line[6:]
+            if payload_str == "[DONE]":
+                break
+            try:
+                chunk = json.loads(payload_str)
+                event_type = chunk.get("type", "")
+
+                # Anthropic SSE 事件类型:
+                # - content_block_delta: 文本增量
+                # - message_stop: 结束
+                if event_type == "content_block_delta":
+                    delta = chunk.get("delta", {})
+                    text = delta.get("text", "")
+                    if text:
+                        yield text
+                elif event_type == "message_stop":
+                    break
+            except (json.JSONDecodeError, KeyError):
+                logger.debug("忽略无法解析的 Anthropic chunk: %s", line)
+        elif line.startswith("event: "):
+            # Anthropic SSE 使用 event: + data: 格式，event 行跳过
+            continue
+
+
 def call_chat(
     messages: list[dict],
     temperature: float = 0.4,
@@ -208,13 +342,10 @@ def call_chat(
 ) -> str:
     """
     通用多轮对话调用（非流式），返回完整的 LLM 回复文本。
-
-    Args:
-        messages: OpenAI 格式的 messages 数组，如
-                  [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}]
-        temperature: 采样温度
-        model: 可选覆盖模型名称，默认使用全局 LLM_MODEL
+    自动根据 LLM_PROVIDER 选择 OpenAI 兼容格式或 Anthropic 原生格式。
     """
+    if _is_anthropic():
+        return _call_anthropic_chat(messages, temperature, model)
     use_model = model or LLM_MODEL
     payload = {
         "model": use_model,
@@ -246,17 +377,11 @@ def call_chat_stream(
 ) -> Generator[str, None, None]:
     """
     流式多轮对话调用，返回逐 chunk 产出文本的生成器。
-
-    通义千问 OpenAI 兼容接口支持 stream=true，返回 SSE 格式数据。
-    每个 yield 产出一小段文本内容（delta），调用方可逐段拼接或推送给前端。
-
-    Args:
-        messages: OpenAI 格式的 messages 数组
-        temperature: 采样温度
-        model: 可选覆盖模型名称
-    Yields:
-        str: 每次产出的文本片段
+    自动根据 LLM_PROVIDER 选择 OpenAI 兼容格式或 Anthropic 原生格式。
     """
+    if _is_anthropic():
+        yield from _call_anthropic_stream(messages, temperature, model)
+        return
     use_model = model or LLM_MODEL
     payload = {
         "model": use_model,
