@@ -67,6 +67,13 @@
             </span>
             <div class="session-actions">
               <el-icon
+                class="session-action-icon session-share"
+                @click.stop="handleShareSession(session.id)"
+                title="分享"
+              >
+                <Share />
+              </el-icon>
+              <el-icon
                 class="session-action-icon session-edit"
                 @click.stop="startRename(session.id, session.title)"
                 title="重命名"
@@ -652,10 +659,11 @@
 import { ref, computed, onMounted, nextTick, watch, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import axios from 'axios'
 import {
   Delete, Loading, CircleCheckFilled, Document, Promotion, VideoPause,
   Close, Paperclip, Compass, Checked, Monitor, Cpu, DataLine, List,
-  ArrowDown, Edit, Search, Fold,
+  ArrowDown, Edit, Search, Fold, Share,
 } from '@element-plus/icons-vue'
 import mermaid from 'mermaid'
 import { useChatStore } from '@/stores/chat'
@@ -938,6 +946,24 @@ async function handleSwitchSession(sessionId: string) {
   // 如果正在生成中，恢复轮询
   if (chatStore.currentSession?.status === 'generating') {
     chatStore.startPolling()
+  }
+}
+
+/** 分享会话 */
+async function handleShareSession(sessionId: string) {
+  try {
+    const { data } = await axios.post(`/api/chat/sessions/${sessionId}/share`, {
+      expires_hours: 0,
+    })
+    if (data.success) {
+      const shareUrl = `${window.location.origin}${data.url}`
+      await navigator.clipboard.writeText(shareUrl)
+      ElMessage.success('分享链接已复制到剪贴板')
+    } else {
+      ElMessage.error(data.message || '创建分享失败')
+    }
+  } catch {
+    ElMessage.error('创建分享失败')
   }
 }
 
@@ -1328,6 +1354,10 @@ function downloadArtifact(msg: ChatMessage) {
 
 .session-edit:hover {
   color: #409eff;
+}
+
+.session-share:hover {
+  color: #67c23a;
 }
 
 .session-delete:hover {

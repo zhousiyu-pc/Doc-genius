@@ -126,6 +126,55 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    # 分享链接表
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS share_links (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            user_id TEXT DEFAULT '',
+            token TEXT UNIQUE NOT NULL,
+            expires_at TEXT,
+            password TEXT DEFAULT '',
+            view_count INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES chat_sessions(id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_share_links_token ON share_links(token)")
+
+    # 模板表
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS templates (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            category TEXT DEFAULT '',
+            icon TEXT DEFAULT '',
+            prompt TEXT NOT NULL,
+            mode TEXT DEFAULT 'free',
+            is_builtin INTEGER DEFAULT 0,
+            use_count INTEGER DEFAULT 0,
+            created_by TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+    # 版本历史表
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS session_versions (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            version_num INTEGER NOT NULL,
+            title TEXT DEFAULT '',
+            outline TEXT DEFAULT '',
+            snapshot TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES chat_sessions(id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_session_versions_sid ON session_versions(session_id)")
+
     conn.commit()
     conn.close()
     logger.info("数据库初始化完成: %s", DB_PATH)

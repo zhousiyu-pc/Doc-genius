@@ -36,6 +36,9 @@ from core.rate_limiter import RateLimitMiddleware
 from core.logger import setup_logging
 from skills.conversation.routes import routes as chat_routes
 from core.auth_routes import auth_routes
+from core.share_routes import share_routes
+from core.template_routes import template_routes
+from core.version_routes import version_routes
 from skills.pipeline import init_pipeline_executor, shutdown_pipeline_executor
 
 
@@ -61,6 +64,9 @@ async def api_health(request: Request) -> JSONResponse:
 all_routes = [
     Route("/api/health", api_health, methods=["GET"]),
     *auth_routes,
+    *share_routes,
+    *template_routes,
+    *version_routes,
     *chat_routes,
 ]
 
@@ -109,6 +115,10 @@ def main():
 
     setup_logging()
     init_db()
+
+    from core.templates import init_builtin_templates
+    init_builtin_templates()
+
     init_pipeline_executor()
 
     print("=" * 60)

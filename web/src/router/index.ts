@@ -12,6 +12,12 @@ const router = createRouter({
       meta: { guest: true },
     },
     {
+      path: '/share/:token',
+      name: 'share',
+      component: () => import('@/views/ShareView.vue'),
+      meta: { guest: true },
+    },
+    {
       path: '/',
       name: 'chat',
       component: () => import('@/views/ChatView.vue'),
