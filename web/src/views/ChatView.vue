@@ -141,6 +141,34 @@
         </el-button>
         <span class="mobile-title">{{ chatStore.currentSession?.title || 'AI 需求分析' }}</span>
       </div>
+      
+      <!-- 桌面端顶栏 - 模型切换 -->
+      <div v-if="chatStore.currentSessionId" class="chat-header">
+        <div class="header-title">{{ chatStore.currentSession?.title || '对话中' }}</div>
+        <div class="header-actions">
+          <el-select
+            v-model="chatStore.currentSession!.model"
+            placeholder="选择模型"
+            size="small"
+            class="header-model-select"
+            @change="handleSwitchModel"
+          >
+            <el-option-group
+              v-for="group in modelGroups"
+              :key="group.label"
+              :label="group.label"
+            >
+              <el-option
+                v-for="model in group.models"
+                :key="model.id"
+                :label="model.name"
+                :value="model.id"
+              />
+            </el-option-group>
+          </el-select>
+        </div>
+      </div>
+      
       <!-- 未选择会话时的欢迎页 -->
       <div v-if="!chatStore.currentSessionId" class="welcome-screen">
         <div class="welcome-content">
@@ -148,6 +176,28 @@
           <p class="welcome-desc">
             专业的技术产品专家，助力你的想法落地为可开发的逻辑
           </p>
+          
+          <!-- 模型选择 -->
+          <div class="model-selector-wrap">
+            <label class="model-selector-label">选择模型：</label>
+            <el-select v-model="selectedModel" placeholder="选择模型" size="large" clearable class="model-select">
+              <el-option-group
+                v-for="group in modelGroups"
+                :key="group.label"
+                :label="group.label"
+              >
+                <el-option
+                  v-for="model in group.models"
+                  :key="model.id"
+                  :label="model.name"
+                  :value="model.id"
+                >
+                  <span>{{ model.name }}</span>
+                  <span class="model-tier-tag" :class="model.tier">{{ model.tier }}</span>
+                </el-option>
+              </el-option-group>
+            </el-select>
+          </div>
           
           <div class="mode-selector-wrap">
             <div class="mode-card free" @click="handleNewChatWithMode('free')">
@@ -705,6 +755,22 @@ const authStore = useAuthStore()
 const inputText = ref('')
 const messagesArea = ref<HTMLElement | null>(null)
 
+// 模型选择
+const selectedModel = ref<string>('')
+
+// 模型分组（按 tier）
+const modelGroups = computed(() => {
+  const groups: Record<string, any[]> = { base: [], advanced: [], premium: [] }
+  for (const m of chatStore.availableModels) {
+    groups[m.tier]?.push(m)
+  }
+  return [
+    { label: '基础模型 (免费)', models: groups.base },
+    { label: '高级模型 (专业版+)', models: groups.advanced },
+    { label: '旗舰模型 (团队版+)', models: groups.premium },
+  ].filter(g => g.models.length > 0)
+})
+
 // 搜索
 const searchQuery = ref('')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -882,6 +948,7 @@ function cleanupAllMermaidOrphans() {
 onMounted(async () => {
   cleanupAllMermaidOrphans()
   await chatStore.loadSessions()
+  await chatStore.loadAvailableModels()
   const sessionId = route.params.sessionId as string
   if (sessionId) {
     await chatStore.switchSession(sessionId)
@@ -921,10 +988,22 @@ function statusLabel(status: string): string {
 
 /** 创建指定模式的新对话 */
 async function handleNewChatWithMode(mode: string) {
-  const sessionId = await chatStore.createSession('', mode)
+  const sessionId = await chatStore.createSession('', mode, selectedModel.value || null)
   if (sessionId) {
     await chatStore.switchSession(sessionId)
     router.replace({ name: 'chatSession', params: { sessionId } })
+    selectedModel.value = '' // 重置
+  }
+}
+
+/** 切换当前会话模型 */
+async function handleSwitchModel(modelId: string) {
+  if (!modelId) return
+  const ok = await chatStore.switchModel(modelId)
+  if (ok) {
+    ElMessage.success(`已切换到 ${chatStore.availableModels.find(m => m.id === modelId)?.name || modelId}`)
+  } else {
+    ElMessage.error('切换模型失败')
   }
 }
 
@@ -1582,6 +1661,33 @@ function downloadArtifact(msg: ChatMessage) {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  position: relative;
+}
+
+/* 聊天顶栏 - 模型切换 */
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border-primary);
+  background: var(--bg-primary);
+}
+
+.header-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-model-select {
+  width: 200px;
 }
 
 /* ── 欢迎页 ──────────────────────────────── */
@@ -1610,6 +1716,48 @@ function downloadArtifact(msg: ChatMessage) {
   color: var(--text-muted);
   line-height: 1.6;
   margin-bottom: 24px;
+}
+
+/* 模型选择器 */
+.model-selector-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.model-selector-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.model-select {
+  width: 280px;
+}
+
+.model-tier-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 8px;
+  font-weight: 500;
+}
+
+.model-tier-tag.base {
+  background: #e8f0fe;
+  color: #1967d2;
+}
+
+.model-tier-tag.advanced {
+  background: #fce8e6;
+  color: #c5221f;
+}
+
+.model-tier-tag.premium {
+  background: #f0f9eb;
+  color: #67c23a;
 }
 
 .welcome-examples {
@@ -2803,6 +2951,14 @@ function downloadArtifact(msg: ChatMessage) {
 
   .mobile-header {
     display: flex;
+  }
+  
+  .chat-header {
+    padding: 10px 12px;
+  }
+  
+  .header-model-select {
+    width: 140px;
   }
 
   .message-bubble {
