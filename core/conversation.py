@@ -329,6 +329,44 @@ def list_sessions() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def search_sessions(query: str, limit: int = 20) -> list[dict]:
+    """
+    搜索会话：按标题和消息内容模糊匹配。
+    返回匹配的会话列表（去重），按更新时间倒序。
+    """
+    like = f"%{query}%"
+    with get_db() as conn:
+        # 标题匹配
+        title_rows = conn.execute(
+            "SELECT * FROM chat_sessions WHERE title LIKE ? ORDER BY updated_at DESC LIMIT ?",
+            (like, limit),
+        ).fetchall()
+
+        # 消息内容匹配 → 找到对应的 session_id
+        msg_rows = conn.execute(
+            "SELECT DISTINCT session_id FROM chat_messages WHERE content LIKE ? LIMIT ?",
+            (like, limit * 2),
+        ).fetchall()
+        msg_sids = {r["session_id"] for r in msg_rows}
+
+        # 合并去重
+        seen = set()
+        results = []
+        for r in title_rows:
+            d = dict(r)
+            seen.add(d["id"])
+            results.append(d)
+        if msg_sids - seen:
+            placeholders = ",".join("?" for _ in (msg_sids - seen))
+            extra = conn.execute(
+                f"SELECT * FROM chat_sessions WHERE id IN ({placeholders}) ORDER BY updated_at DESC",
+                list(msg_sids - seen),
+            ).fetchall()
+            results.extend(dict(r) for r in extra)
+
+    return results[:limit]
+
+
 def delete_session(session_id: str) -> bool:
     with get_db() as conn:
         conn.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))

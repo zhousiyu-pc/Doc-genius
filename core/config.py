@@ -20,11 +20,20 @@ class ServerConfig:
     debug: bool = False
 
 
+# 各 LLM 提供商的默认 API URL
+LLM_PROVIDER_URLS = {
+    "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "openai": "https://api.openai.com/v1/chat/completions",
+    "deepseek": "https://api.deepseek.com/v1/chat/completions",
+}
+
+
 @dataclass(frozen=True)
 class LLMConfig:
     """LLM 配置"""
     api_key: str
     model: str = "qwen-plus"
+    provider: str = "dashscope"
     api_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
     timeout: int = 180
     temperature: float = 0.3
@@ -102,11 +111,19 @@ class Config:
     def llm(cls) -> LLMConfig:
         """获取 LLM 配置"""
         if cls._llm is None:
-            api_key = os.environ.get("LLM_API_KEY", "sk-c158df64ece64143b8ee42975ed5d565")
+            api_key = os.environ.get("LLM_API_KEY", "")
             cls._validate_api_key(api_key)
+            provider = os.environ.get("LLM_PROVIDER", "dashscope").lower()
+            default_url = LLM_PROVIDER_URLS.get(
+                provider,
+                LLM_PROVIDER_URLS["dashscope"],
+            )
+            api_url = os.environ.get("LLM_API_URL", default_url)
             cls._llm = LLMConfig(
                 api_key=api_key.strip(),
                 model=os.environ.get("LLM_MODEL", "qwen-plus"),
+                provider=provider,
+                api_url=api_url,
                 timeout=cls._get_int("LLM_TIMEOUT", 180),
                 temperature=cls._get_float("LLM_TEMPERATURE", 0.3),
             )
@@ -160,8 +177,13 @@ class Config:
 # 兼容旧代码的快捷访问
 HOST = os.environ.get("SKILLS_HOST", "0.0.0.0")
 PORT = Config._get_int("SKILLS_PORT", 8766)
-LLM_API_KEY = os.environ.get("LLM_API_KEY", "sk-c158df64ece64143b8ee42975ed5d565")
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "qwen-plus")
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "dashscope").lower()
+LLM_API_URL = os.environ.get(
+    "LLM_API_URL",
+    LLM_PROVIDER_URLS.get(LLM_PROVIDER, LLM_PROVIDER_URLS["dashscope"]),
+)
 TASK_WORKERS = Config._get_int("TASK_WORKERS", 3)
 MAX_RETRIES = Config._get_int("MAX_RETRIES", 3)
 RETRY_INTERVALS = (15, 30, 60)

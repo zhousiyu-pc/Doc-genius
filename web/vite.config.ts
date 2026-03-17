@@ -10,6 +10,16 @@ export default defineConfig({
       '@': resolve(__dirname, 'src'),
     },
   },
+  build: {
+    rollupOptions: {
+      external: ['mermaid'],
+      output: {
+        globals: {
+          mermaid: 'mermaid',
+        },
+      },
+    },
+  },
   server: {
     port: 3000,
     proxy: {

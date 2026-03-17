@@ -102,6 +102,18 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  /** 搜索会话 */
+  async function searchSessions(query: string) {
+    try {
+      const { data } = await axios.get('/api/chat/sessions', { params: { q: query } })
+      if (data.success) {
+        sessions.value = data.sessions
+      }
+    } catch (err) {
+      console.error('搜索会话失败:', err)
+    }
+  }
+
   /** 创建新会话 */
   async function createSession(title = '', mode = 'free'): Promise<string | null> {
     try {
@@ -687,6 +699,7 @@ export const useChatStore = defineStore('chat', () => {
     currentSession,
     isGenerating,
     loadSessions,
+    searchSessions,
     createSession,
     renameSession,
     loadStageSummaries,

@@ -1,8 +1,8 @@
 """
-LLM 客户端 — 通义千问 Qwen
+LLM 客户端 — 多模型支持
 ========================
-直接调用通义千问 API 生成功能点详设文档，
-支持普通调用和 SSE 流式调用两种模式。
+支持 dashscope（通义千问）、openai、deepseek 等 OpenAI 兼容 API，
+通过配置切换提供商。支持普通调用和 SSE 流式调用两种模式。
 """
 
 import json
@@ -14,12 +14,11 @@ import urllib.request
 import urllib.error
 from typing import Generator
 
-from .config import LLM_API_KEY, LLM_MODEL
+from .config import LLM_API_KEY, LLM_MODEL, LLM_API_URL, LLM_PROVIDER
 
 logger = logging.getLogger("agent_skills.llm_client")
 
-# 通义千问 OpenAI 兼容接口
-LLM_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+# LLM_API_URL 从 core.config 中根据 LLM_PROVIDER 自动确定（支持 LLM_API_URL 环境变量覆盖）
 
 # 全局速率控制：确保并发线程不会同时调用 API
 # 每次调用结束后强制等待一段时间再释放下一个请求

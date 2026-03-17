@@ -1,7 +1,7 @@
 <template>
   <div class="chat-layout">
     <!-- 左侧会话列表 -->
-    <aside class="chat-sidebar">
+    <aside class="chat-sidebar" :class="{ 'sidebar-open': sidebarOpen }">
       <div class="sidebar-header">
         <h2 class="sidebar-title">AI 需求分析</h2>
         <el-dropdown trigger="click" @command="handleNewChatWithMode">
@@ -15,6 +15,21 @@
             </el-dropdown-menu>
           </template>
         </el-dropdown>
+      </div>
+      <!-- 搜索框 -->
+      <div class="sidebar-search">
+        <el-input
+          v-model="searchQuery"
+          placeholder="搜索对话..."
+          size="small"
+          clearable
+          @input="handleSearch"
+          @clear="handleSearchClear"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
       </div>
       <div class="session-list">
         <div
@@ -74,12 +89,25 @@
       </div>
       <!-- 底部信息 -->
       <div class="sidebar-footer">
-        <span class="footer-label">AI 需求与详设生成器</span>
+        <el-button link size="small" @click="themeStore.toggle()">
+          {{ themeStore.isDark ? '☀️ 浅色' : '🌙 深色' }}
+        </el-button>
+        <span class="footer-label">Doc-genius</span>
       </div>
     </aside>
 
+    <!-- 移动端侧栏遮罩 -->
+    <div v-if="sidebarOpen" class="sidebar-overlay" @click="sidebarOpen = false"></div>
+
     <!-- 右侧聊天主区域 -->
     <main class="chat-main">
+      <!-- 移动端顶栏 -->
+      <div class="mobile-header">
+        <el-button circle size="small" class="menu-btn" @click="sidebarOpen = !sidebarOpen">
+          <el-icon><Fold /></el-icon>
+        </el-button>
+        <span class="mobile-title">{{ chatStore.currentSession?.title || 'AI 需求分析' }}</span>
+      </div>
       <!-- 未选择会话时的欢迎页 -->
       <div v-if="!chatStore.currentSessionId" class="welcome-screen">
         <div class="welcome-content">
@@ -619,18 +647,28 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Delete, Loading, CircleCheckFilled, Document, Promotion, VideoPause,
-  UploadFilled, Close, Paperclip, Compass, Checked, Monitor, Cpu, DataLine, List,
-  ArrowDown, Edit, Check,
+  Close, Paperclip, Compass, Checked, Monitor, Cpu, DataLine, List,
+  ArrowDown, Edit, Search, Fold,
 } from '@element-plus/icons-vue'
 import mermaid from 'mermaid'
 import { useChatStore } from '@/stores/chat'
+import { useThemeStore } from '@/stores/theme'
 import type { ChatMessage } from '@/stores/chat'
+import { renderMarkdown } from '@/utils/markdown'
 
 const route = useRoute()
 const router = useRouter()
 const chatStore = useChatStore()
+const themeStore = useThemeStore()
 const inputText = ref('')
 const messagesArea = ref<HTMLElement | null>(null)
+
+// 搜索
+const searchQuery = ref('')
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+// 移动端侧栏
+const sidebarOpen = ref(false)
 
 // 每个文档类型的配置状态
 const docConfigs = ref({
@@ -827,78 +865,6 @@ watch(() => chatStore.messages.length, () => {
 })
 watch(() => chatStore.streaming, scrollToBottom)
 
-/** 简单的 Markdown 渲染（将关键标记转为 HTML） */
-function renderMarkdown(text: string): string {
-  if (!text) return ''
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-
-  // Mermaid 代码块：保留原始内容，由后续逻辑渲染
-  html = html.replace(
-    /```mermaid\n([\s\S]*?)```/g,
-    '<div class="mermaid-block"><pre class="mermaid-source">$1</pre></div>'
-  )
-  // 普通代码块
-  html = html.replace(
-    /```(\w*)\n([\s\S]*?)```/g,
-    '<pre class="code-block"><code>$2</code></pre>'
-  )
-  // 行内代码
-  html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
-  // 表格
-  html = renderTables(html)
-  // 标题
-  html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>')
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
-  // 粗体和斜体
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
-  // 列表
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>')
-  html = html.replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
-  // 分割线
-  html = html.replace(/^---$/gm, '<hr/>')
-  // 换行
-  html = html.replace(/\n/g, '<br/>')
-  // 修复列表包裹
-  html = html.replace(/(<li>.*?<\/li>(<br\/>)?)+/g, (match) => {
-    return '<ul>' + match.replace(/<br\/>/g, '') + '</ul>'
-  })
-  return html
-}
-
-/** Markdown 表格渲染 */
-function renderTables(text: string): string {
-  const tableRegex = /(\|.+\|[\r\n]+\|[-| :]+\|[\r\n]+((\|.+\|[\r\n]*)+))/g
-  return text.replace(tableRegex, (match) => {
-    const rows = match.trim().split('\n').filter(r => r.trim())
-    if (rows.length < 2) return match
-
-    const headerCells = rows[0].split('|').filter(c => c.trim())
-    const dataRows = rows.slice(2)
-
-    let table = '<table class="md-table"><thead><tr>'
-    for (const cell of headerCells) {
-      table += `<th>${cell.trim()}</th>`
-    }
-    table += '</tr></thead><tbody>'
-    for (const row of dataRows) {
-      const cells = row.split('|').filter(c => c.trim())
-      table += '<tr>'
-      for (const cell of cells) {
-        table += `<td>${cell.trim()}</td>`
-      }
-      table += '</tr>'
-    }
-    table += '</tbody></table>'
-    return table
-  })
-}
-
 /** 会话状态中文标签 */
 function statusLabel(status: string): string {
   const map: Record<string, string> = {
@@ -908,11 +874,6 @@ function statusLabel(status: string): string {
     completed: '已完成',
   }
   return map[status] || status
-}
-
-/** 创建新对话 */
-async function handleNewChat() {
-  await handleNewChatWithMode('free')
 }
 
 /** 创建指定模式的新对话 */
@@ -935,11 +896,29 @@ async function handleQuickStart(example: string) {
   }
 }
 
+/** 搜索对话（防抖 300ms） */
+function handleSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(async () => {
+    const q = searchQuery.value.trim()
+    if (q) {
+      await chatStore.searchSessions(q)
+    } else {
+      await chatStore.loadSessions()
+    }
+  }, 300)
+}
+
+function handleSearchClear() {
+  chatStore.loadSessions()
+}
+
 /** 切换会话 */
 async function handleSwitchSession(sessionId: string) {
   cleanupAllMermaidOrphans()
   await chatStore.switchSession(sessionId)
   router.replace({ name: 'chatSession', params: { sessionId } })
+  sidebarOpen.value = false
   // 如果正在生成中，恢复轮询
   if (chatStore.currentSession?.status === 'generating') {
     chatStore.startPolling()
@@ -1223,14 +1202,14 @@ function downloadArtifact(msg: ChatMessage) {
 .chat-layout {
   display: flex;
   height: 100vh;
-  background: #f8fafc;
+  background: var(--bg-primary);
 }
 
 /* ── 左侧会话列表 ────────────────────────── */
 .chat-sidebar {
   width: 260px;
-  background: #ffffff;
-  border-right: 1px solid #e8ecf1;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-primary);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -1510,13 +1489,13 @@ function downloadArtifact(msg: ChatMessage) {
 }
 
 .assistant-bubble .bubble-content {
-  background: #fff;
-  border: 1px solid #e8ecf1;
+  background: var(--bg-bubble-ai);
+  border: 1px solid var(--border-primary);
   border-radius: 4px 16px 16px 16px;
   padding: 12px 16px;
   font-size: 14px;
   line-height: 1.7;
-  color: #333;
+  color: var(--text-secondary);
   word-break: break-word;
 }
 
@@ -1761,8 +1740,8 @@ function downloadArtifact(msg: ChatMessage) {
 /* ── 底部输入区域 ────────────────────────── */
 .input-area {
   padding: 12px 24px 16px;
-  background: #fff;
-  border-top: 1px solid #e8ecf1;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-primary);
 }
 
 .input-wrapper {
@@ -2480,35 +2459,119 @@ function downloadArtifact(msg: ChatMessage) {
   flex-shrink: 0;
 }
 
+/* ── 搜索框 ────────────────────────────────── */
+.sidebar-search {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e8ecf1;
+}
+
+/* ── 移动端顶栏 ─────────────────────────────── */
+.mobile-header {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #fff;
+  border-bottom: 1px solid #e8ecf1;
+}
+
+.mobile-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1a1a2e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu-btn {
+  flex-shrink: 0;
+}
+
+/* ── 侧栏遮罩 ────────────────────────────────── */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 99;
+}
+
 /* ── 响应式 ──────────────────────────────── */
 @media (max-width: 768px) {
   .chat-sidebar {
-    display: none;
+    position: fixed;
+    left: -280px;
+    top: 0;
+    bottom: 0;
+    width: 280px;
+    z-index: 100;
+    transition: left 0.3s ease;
+    box-shadow: none;
   }
+
+  .chat-sidebar.sidebar-open {
+    left: 0;
+    box-shadow: 4px 0 16px rgba(0, 0, 0, 0.1);
+  }
+
+  .sidebar-overlay {
+    display: block;
+  }
+
+  .mobile-header {
+    display: flex;
+  }
+
   .message-bubble {
     max-width: 90%;
   }
+
   .outline-card {
     min-width: auto;
   }
-  @media (max-width: 768px) {
-    .export-select-bar {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 16px;
-      margin: 0;
-      top: 0;
-      border-radius: 0;
-    }
-    .export-select-right {
-      width: 100%;
-      flex-direction: column;
-      align-items: stretch;
-      gap: 12px;
-    }
-    .export-select-actions {
-      justify-content: flex-end;
-    }
+
+  .export-select-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+    margin: 0;
+    top: 0;
+    border-radius: 0;
+  }
+
+  .export-select-right {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .export-select-actions {
+    justify-content: flex-end;
+  }
+
+  .agile-stepper {
+    overflow-x: auto;
+    gap: 4px;
+    padding: 12px 16px;
+  }
+
+  .stage-label {
+    font-size: 10px;
+  }
+
+  .welcome-content {
+    padding: 20px;
+  }
+
+  .mode-selector-wrap {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .mode-card {
+    max-width: 100%;
   }
 }
 </style>

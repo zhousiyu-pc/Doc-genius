@@ -188,6 +188,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import axios from 'axios'
 import { useTaskStore } from '@/stores/task'
 
 const router = useRouter()
@@ -277,11 +278,11 @@ const selectTemplate = (template: any) => {
   requirement.value = `我想做一个${template.name}，${template.description}`
 }
 
-const viewDocument = (id: string) => {
-  router.push(`/document/${id}`)
+const viewDocument = (_id: string) => {
+  router.push(`/document/${_id}`)
 }
 
-const downloadDocument = (id: string) => {
+const downloadDocument = (_id: string) => {
   // TODO: 实现下载
   alert('下载功能开发中...')
 }

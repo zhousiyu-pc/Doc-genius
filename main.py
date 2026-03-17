@@ -22,12 +22,16 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Route
+from starlette.routing import Route, Mount
+from starlette.staticfiles import StaticFiles
 
-from core.config import HOST, PORT, DATA_DIR, LOG_DIR, LLM_API_KEY, LLM_MODEL
+from core.config import HOST, PORT, DATA_DIR, LOG_DIR, LLM_API_KEY, LLM_MODEL, LLM_PROVIDER
 from core.db import init_db
+from core.error_handler import ErrorHandlerMiddleware
 from core.logger import setup_logging
 from skills.conversation.routes import routes as chat_routes
 from skills.pipeline import init_pipeline_executor, shutdown_pipeline_executor
@@ -46,6 +50,7 @@ async def api_health(request: Request) -> JSONResponse:
         ],
         "port": PORT,
         "data_dir": DATA_DIR,
+        "llm_provider": LLM_PROVIDER,
         "llm_model": LLM_MODEL,
         "llm_key_set": bool(LLM_API_KEY),
     })
@@ -56,8 +61,34 @@ all_routes = [
     *chat_routes,
 ]
 
-app = Starlette(routes=all_routes)
+# ── 静态文件托管（前端 dist）─────────────────────
 
+_web_dist = os.path.join(_project_root, "web", "dist")
+if os.path.isdir(_web_dist):
+    all_routes.append(
+        Mount("/", app=StaticFiles(directory=_web_dist, html=True)),
+    )
+
+
+# ── CORS + 错误处理中间件 ─────────────────────────
+
+ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
+
+middleware = [
+    Middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    ),
+]
+
+app = Starlette(routes=all_routes, middleware=middleware)
+app.add_middleware(ErrorHandlerMiddleware)
+
+
+# ── 服务启动 ──────────────────────────────────────
 
 def main():
     """服务启动入口"""
@@ -73,8 +104,10 @@ def main():
     print(f"  监听地址：    http://localhost:{PORT}")
     print(f"  数据目录：    {DATA_DIR}")
     print(f"  日志目录：    {LOG_DIR}")
+    print(f"  LLM 提供商：  {LLM_PROVIDER}")
     print(f"  LLM 模型：   {LLM_MODEL}")
     print(f"  API Key：     {'已配置' if LLM_API_KEY else '未配置(请设置 LLM_API_KEY)'}")
+    print(f"  前端:        {'已挂载' if os.path.isdir(_web_dist) else '未构建'}")
     print("-" * 60)
     print("  API 端点:")
     print("    POST /api/chat/sessions             创建对话")

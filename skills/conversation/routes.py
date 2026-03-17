@@ -21,6 +21,7 @@ from core.conversation import (
     create_session,
     get_session,
     list_sessions,
+    search_sessions,
     delete_session,
     get_messages,
     get_stage_summaries,
@@ -169,8 +170,12 @@ async def api_rename_session(request: Request) -> JSONResponse:
 
 
 async def api_list_sessions(request: Request) -> JSONResponse:
-    """GET /api/chat/sessions — 列出所有对话会话"""
-    sessions = list_sessions()
+    """GET /api/chat/sessions — 列出所有对话会话（支持 ?q= 搜索）"""
+    query = request.query_params.get("q", "").strip()
+    if query:
+        sessions = search_sessions(query)
+    else:
+        sessions = list_sessions()
     return JSONResponse({"success": True, "sessions": sessions})
 
 
