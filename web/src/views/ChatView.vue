@@ -177,28 +177,6 @@
             专业的技术产品专家，助力你的想法落地为可开发的逻辑
           </p>
           
-          <!-- 模型选择 -->
-          <div class="model-selector-wrap">
-            <label class="model-selector-label">选择模型：</label>
-            <el-select v-model="selectedModel" placeholder="选择模型" size="large" clearable class="model-select">
-              <el-option-group
-                v-for="group in modelGroups"
-                :key="group.label"
-                :label="group.label"
-              >
-                <el-option
-                  v-for="model in group.models"
-                  :key="model.id"
-                  :label="model.name"
-                  :value="model.id"
-                >
-                  <span>{{ model.name }}</span>
-                  <span class="model-tier-tag" :class="model.tier">{{ model.tier }}</span>
-                </el-option>
-              </el-option-group>
-            </el-select>
-          </div>
-          
           <div class="mode-selector-wrap">
             <div class="mode-card free" @click="handleNewChatWithMode('free')">
               <div class="mode-icon"><Compass /></div>
@@ -755,9 +733,6 @@ const authStore = useAuthStore()
 const inputText = ref('')
 const messagesArea = ref<HTMLElement | null>(null)
 
-// 模型选择
-const selectedModel = ref<string>('')
-
 // 模型分组（按 tier）
 const modelGroups = computed(() => {
   const groups: Record<string, any[]> = { base: [], advanced: [], premium: [] }
@@ -988,11 +963,10 @@ function statusLabel(status: string): string {
 
 /** 创建指定模式的新对话 */
 async function handleNewChatWithMode(mode: string) {
-  const sessionId = await chatStore.createSession('', mode, selectedModel.value || null)
+  const sessionId = await chatStore.createSession('', mode, null)
   if (sessionId) {
     await chatStore.switchSession(sessionId)
     router.replace({ name: 'chatSession', params: { sessionId } })
-    selectedModel.value = '' // 重置
   }
 }
 
@@ -1716,48 +1690,6 @@ function downloadArtifact(msg: ChatMessage) {
   color: var(--text-muted);
   line-height: 1.6;
   margin-bottom: 24px;
-}
-
-/* 模型选择器 */
-.model-selector-wrap {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-bottom: 28px;
-}
-
-.model-selector-label {
-  font-size: 14px;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.model-select {
-  width: 280px;
-}
-
-.model-tier-tag {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  margin-left: 8px;
-  font-weight: 500;
-}
-
-.model-tier-tag.base {
-  background: #e8f0fe;
-  color: #1967d2;
-}
-
-.model-tier-tag.advanced {
-  background: #fce8e6;
-  color: #c5221f;
-}
-
-.model-tier-tag.premium {
-  background: #f0f9eb;
-  color: #67c23a;
 }
 
 .welcome-examples {
