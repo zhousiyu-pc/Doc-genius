@@ -28,6 +28,27 @@ LLM_PROVIDER_URLS = {
     "anthropic": "https://api.anthropic.com/v1/messages",
 }
 
+# 可用模型列表（带分级和成本估算）
+AVAILABLE_MODELS = [
+    {"id": "qwen-plus", "name": "通义千问 Plus", "provider": "dashscope", "tier": "base", "cost_multiplier": 1.0},
+    {"id": "deepseek-chat", "name": "DeepSeek Chat", "provider": "deepseek", "tier": "base", "cost_multiplier": 0.5},
+    {"id": "qwen-max", "name": "通义千问 Max", "provider": "dashscope", "tier": "advanced", "cost_multiplier": 4.0},
+    {"id": "gpt-4o", "name": "GPT-4o", "provider": "openai", "tier": "advanced", "cost_multiplier": 7.5},
+    {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "provider": "anthropic", "tier": "advanced", "cost_multiplier": 7.5},
+    {"id": "claude-opus-4-6", "name": "Claude Opus 4.6", "provider": "anthropic", "tier": "premium", "cost_multiplier": 37.5},
+    {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "provider": "openai", "tier": "base", "cost_multiplier": 0.8},
+    {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner", "provider": "deepseek", "tier": "advanced", "cost_multiplier": 2.0},
+    {"id": "qwen-turbo", "name": "通义千问 Turbo", "provider": "dashscope", "tier": "base", "cost_multiplier": 0.3},
+]
+
+# 套餐级别可访问的模型 tier
+PLAN_MODEL_ACCESS = {
+    "free": ["base"],
+    "pro": ["base", "advanced"],
+    "team": ["base", "advanced", "premium"],
+    "enterprise": ["base", "advanced", "premium"],
+}
+
 
 @dataclass(frozen=True)
 class LLMConfig:

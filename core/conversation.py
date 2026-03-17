@@ -295,7 +295,7 @@ def parse_export_command(text: str) -> tuple[str, Optional[dict]]:
 
 # ── 会话管理 ──────────────────────────────────────────────────────
 
-def create_session(title: str = "", mode: str = "free", user_id: str = "") -> dict:
+def create_session(title: str = "", mode: str = "free", user_id: str = "", model: str = None) -> dict:
     """
     创建新的对话会话。
 
@@ -303,19 +303,20 @@ def create_session(title: str = "", mode: str = "free", user_id: str = "") -> di
         title: 会话标题（可选，为空时由第一条消息自动设置）
         mode: 对话模式 - 'free'(自由对话) 或 'agile'(敏捷工程)
         user_id: 用户 ID（认证模式下必填）
+        model: 模型 ID（可选，None 则使用默认模型）
     Returns:
-        会话字典，包含 id/title/status/mode/current_stage/created_at
+        会话字典，包含 id/title/status/mode/current_stage/model/created_at
     """
     session_id = uuid.uuid4().hex[:12]
     now = datetime.datetime.now().isoformat()
     initial_stage = "discovery" if mode == "agile" else ""
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO chat_sessions (id, title, status, mode, current_stage, user_id, created_at, updated_at) "
-            "VALUES (?, ?, 'active', ?, ?, ?, ?, ?)",
-            (session_id, title, mode, initial_stage, user_id, now, now),
+            "INSERT INTO chat_sessions (id, title, status, mode, current_stage, user_id, model, created_at, updated_at) "
+            "VALUES (?, ?, 'active', ?, ?, ?, ?, ?, ?)",
+            (session_id, title, mode, initial_stage, user_id, model, now, now),
         )
-    return {"id": session_id, "title": title, "status": "active", "mode": mode, "current_stage": initial_stage, "created_at": now}
+    return {"id": session_id, "title": title, "status": "active", "mode": mode, "current_stage": initial_stage, "model": model, "created_at": now}
 
 
 def get_session(session_id: str) -> Optional[dict]:
@@ -541,7 +542,9 @@ def chat_stream(session_id: str, user_input: str) -> Generator[dict, None, None]
     
     full_response = ""
     try:
-        for chunk in call_chat_stream(llm_messages):
+        # 获取会话使用的模型（如果有）
+        session_model = session.get("model") if session else None
+        for chunk in call_chat_stream(llm_messages, model=session_model):
             full_response += chunk
             yield {"type": "text", "content": chunk}
     except Exception as exc:

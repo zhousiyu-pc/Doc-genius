@@ -44,6 +44,7 @@ export interface ChatSession {
   status: 'active' | 'confirmed' | 'generating' | 'completed'
   mode: 'free' | 'agile'
   current_stage: string
+  model?: string | null
   outline?: OutlineData | null
   task_id?: string
   created_at: string
@@ -79,9 +80,16 @@ export const useChatStore = defineStore('chat', () => {
   /** 敏捷模式：待确认的环节完成询问（AI 输出 [STAGE_READY] 时设置） */
   const stageReady = ref<{ stage: string; summary?: string } | null>(null)
 
+  /** 可用模型列表 */
+  const availableModels = ref<Array<{id: string, name: string, provider: string, tier: string, cost_multiplier: number}>>([])
+
   // ── 计算属性 ──────────────────────────────────────
   const currentSession = computed(() =>
     sessions.value.find(s => s.id === currentSessionId.value) || null
+  )
+
+  const currentModel = computed(() =>
+    currentSession.value?.model || null
   )
 
   const isGenerating = computed(() =>
@@ -115,9 +123,9 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /** 创建新会话 */
-  async function createSession(title = '', mode = 'free'): Promise<string | null> {
+  async function createSession(title = '', mode = 'free', model: string | null = null): Promise<string | null> {
     try {
-      const { data } = await axios.post('/api/chat/sessions', { title, mode })
+      const { data } = await axios.post('/api/chat/sessions', { title, mode, model })
       if (data.success) {
         const newSession: ChatSession = {
           id: data.id,
@@ -125,6 +133,7 @@ export const useChatStore = defineStore('chat', () => {
           status: 'active',
           mode: data.mode || 'free',
           current_stage: data.current_stage || 'discovery',
+          model: data.model || null,
           created_at: data.created_at,
           updated_at: data.created_at,
         }
@@ -681,6 +690,36 @@ export const useChatStore = defineStore('chat', () => {
     stageReady.value = null
   }
 
+  /** 加载可用模型列表 */
+  async function loadAvailableModels() {
+    try {
+      const { data } = await axios.get('/api/models')
+      if (data.success) {
+        availableModels.value = data.models
+      }
+    } catch (err) {
+      console.error('加载模型列表失败:', err)
+    }
+  }
+
+  /** 切换会话模型 */
+  async function switchModel(modelId: string): Promise<boolean> {
+    if (!currentSessionId.value) return false
+    try {
+      const { data } = await axios.put(`/api/chat/sessions/${currentSessionId.value}/model`, { model: modelId })
+      if (data.success) {
+        const session = sessions.value.find(s => s.id === currentSessionId.value)
+        if (session) {
+          session.model = modelId
+        }
+        return true
+      }
+    } catch (err) {
+      console.error('切换模型失败:', err)
+    }
+    return false
+  }
+
   return {
     sessions,
     currentSessionId,
@@ -695,6 +734,8 @@ export const useChatStore = defineStore('chat', () => {
     stageReady,
     selectedMessageIds,
     exportFormat,
+    availableModels,
+    currentModel,
     exporting,
     currentSession,
     isGenerating,
@@ -722,5 +763,7 @@ export const useChatStore = defineStore('chat', () => {
     startPolling,
     stopPolling,
     reset,
+    loadAvailableModels,
+    switchModel,
   }
 })

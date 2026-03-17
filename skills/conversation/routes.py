@@ -86,7 +86,18 @@ async def api_create_session(request: Request) -> JSONResponse:
         body = {}
     title = body.get("title", "")
     mode = body.get("mode", "free")
-    session = create_session(title, mode, user_id=user_id)
+    model = body.get("model")  # 可选，None 则使用默认
+    
+    # 检查模型访问权限
+    if model:
+        from core.plans import check_model_access
+        if not check_model_access(user_id or "anonymous", model):
+            return JSONResponse(
+                {"success": False, "message": "当前套餐无权使用此模型，请升级套餐", "required_plan": "pro"},
+                status_code=403
+            )
+    
+    session = create_session(title, mode, user_id=user_id, model=model)
     return JSONResponse({"success": True, **session})
 
 
@@ -759,6 +770,78 @@ async def api_download_file(request: Request):
     )
 
 
+
+async def api_list_models(request: Request) -> JSONResponse:
+    """GET /api/models — 获取可用模型列表（带权限过滤）"""
+    user_id = ""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        from core.auth import verify_token
+        payload = verify_token(auth_header[7:])
+        if payload:
+            user_id = payload["sub"]
+    
+    from core.config import AVAILABLE_MODELS
+    from core.plans import get_user_plan
+    
+    user_plan = get_user_plan(user_id or "anonymous")
+    plan_id = user_plan["plan"]["id"]
+    
+    from core.config import PLAN_MODEL_ACCESS
+    allowed_tiers = PLAN_MODEL_ACCESS.get(plan_id, ["base"])
+    
+    # 过滤用户有权访问的模型
+    accessible_models = [
+        m for m in AVAILABLE_MODELS
+        if m["tier"] in allowed_tiers
+    ]
+    
+    return JSONResponse({
+        "success": True,
+        "models": accessible_models,
+        "current_plan": plan_id,
+    })
+
+
+async def api_switch_model(request: Request) -> JSONResponse:
+    """PUT /api/chat/sessions/{id}/model — 切换会话使用的模型"""
+    from core.plans import check_model_access
+    
+    session_id = request.path_params["id"]
+    user_id, err = _require_auth(request)
+    if err:
+        return err
+    
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "message": "无效的请求体"}, status_code=400)
+    
+    model = body.get("model")
+    if not model:
+        return JSONResponse({"success": False, "message": "未指定模型"}, status_code=400)
+    
+    # 检查模型访问权限
+    if not check_model_access(user_id or "anonymous", model):
+        return JSONResponse(
+            {"success": False, "message": "当前套餐无权使用此模型，请升级套餐", "required_plan": "pro"},
+            status_code=403
+        )
+    
+    # 更新会话的模型设置
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE chat_sessions SET model = ? WHERE id = ? AND user_id = ?",
+            (model, session_id, user_id),
+        )
+        if conn.rowcount == 0:
+            return JSONResponse({"success": False, "message": "会话不存在"}, status_code=404)
+    
+    logger.info("切换模型：session=%s, model=%s", session_id, model)
+    return JSONResponse({"success": True, "model": model})
+
+
+
 routes = [
     Route("/api/chat/sessions", api_sessions_handler, methods=["GET", "POST"]),
     Route("/api/chat/sessions/{id}", api_session_handler, methods=["GET", "DELETE"]),
@@ -772,4 +855,6 @@ routes = [
     Route("/api/chat/sessions/{id}/rename", api_rename_session, methods=["PUT"]),
     Route("/api/chat/sessions/{id}/export", api_export_selected, methods=["POST"]),
     Route("/api/chat/sessions/{id}/files/{filename:path}", api_download_file, methods=["GET"]),
+    Route("/api/chat/sessions/{id}/model", api_switch_model, methods=["PUT"]),
+    Route("/api/models", api_list_models, methods=["GET"]),
 ]
