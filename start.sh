@@ -97,6 +97,12 @@ fi
 echo "启动 Doc-genius 服务 ..."
 
 cd "$PROJECT_DIR"
+
+# 激活虚拟环境
+if [ -d "$PROJECT_DIR/.venv" ]; then
+    source "$PROJECT_DIR/.venv/bin/activate"
+fi
+
 nohup python3 "$SCRIPT_DIR/main.py" > "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 echo "$SERVER_PID" > "$PID_FILE"
